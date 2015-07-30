@@ -203,9 +203,10 @@ class ChimeraSched (ChimeraCLI):
                     self.out("%s %s %s filter=%s exptime=%s frames=%s" % (imagetype, objname, str(position), filter,
                                                                           exptime, frames))
 
-                    program.actions.append(Expose(shutter=shutter, filename="%s-$DATE-$TIME" % objname.replace(" ", ""),
-                                                  filter=filter, frames=frames, exptime=exptime, imageType=imagetype,
-                                                  objectName=objname))
+                    if imagetype != "AUTOFOCUS":
+                        program.actions.append(
+                            Expose(shutter=shutter, filename="%s-$DATE-$TIME" % objname.replace(" ", ""), filter=filter,
+                                   frames=frames, exptime=exptime, imageType=imagetype, objectName=objname))
                 self.out("")
                 programs.append(program)
 
