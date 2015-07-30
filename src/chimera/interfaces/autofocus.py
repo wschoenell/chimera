@@ -37,13 +37,16 @@ class FocusNotFoundException (ChimeraException):
 
 class Autofocus (Interface):
 
-    __config__ = {"camera": "/Camera/0",
-                  "filterwheel": "/FilterWheel/0",
-                  "focuser": "/Focuser/0",
-                  "max_tries": 3}
+    __config__ = {"camera": "/Camera/0",            # Camera where the focuser is connected
+                  "filterwheel": "/FilterWheel/0",  # Filterwheel of the camera (if exists)
+                  "focuser": "/Focuser/0",          # Focuser to focus
+                  "start": None,                    # Default starting point of the fit. Can be overridden.
+                  "end": None,                      # Default end point of the fit. Can be overridden.
+                  "step": None,                     # Default end point of the fit. Can be overridden.
+                  "max_tries": 3}                   # Number of tries to find a star to focus.
 
     def focus(self, filter=None, exptime=None, binning=None, window=None,
-              start=2000, end=6000, step=500,
+              start=None, end=None, step=None,
               minmax=None, debug=False):
         """
         Focus

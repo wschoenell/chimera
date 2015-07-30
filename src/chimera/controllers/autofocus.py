@@ -1,23 +1,19 @@
 from __future__ import division
 
+import numpy as N
+import yaml
+
 from chimera.core.chimeraobject import ChimeraObject
 from chimera.core.lock import lock
-from chimera.core.event import event
 from chimera.core.exceptions import ChimeraException, ClassLoaderException
 from chimera.core.constants import SYSTEM_CONFIG_DIRECTORY
-
 from chimera.interfaces.autofocus import Autofocus as IAutofocus
 from chimera.interfaces.autofocus import StarNotFoundException, FocusNotFoundException
 from chimera.interfaces.focuser import InvalidFocusPositionException
-
 from chimera.controllers.imageserver.imagerequest import ImageRequest
 from chimera.controllers.imageserver.util         import getImageServer
-
 from chimera.util.image import Image
 from chimera.util.output import red, green
-
-import numpy as N
-import yaml
 
 plot = True
 try:
@@ -25,7 +21,7 @@ try:
 except (ImportError, RuntimeError, ClassLoaderException):
     plot = False
 
-from math import sqrt, ceil
+from math import sqrt
 import time
 import os
 import logging
@@ -101,7 +97,7 @@ class FocusFit(object):
         return hash((self.A, self.B, self.C, self.err))
 
     def __nonzero__(self):
-        return (self.position != None) and (self.fwhm != None)
+        return (self.position is not None) and (self.fwhm is not None)
 
     @staticmethod
     def fit(position, fwhm, temperature=None, minmax=None):
@@ -197,9 +193,16 @@ class Autofocus(ChimeraObject, IAutofocus):
             self._log_handler.close()
 
     @lock
-    def focus(self, filter=None, exptime=None, binning=None, window=None,
-               start=2000, end=6000, step=500,
-               minmax=(0,30), debug=False):
+    def focus(self, filter=None, exptime=None, binning=None, window=None, start=None, end=None, step=None,
+              minmax=(0, 30), debug=False):
+
+        # If start, end or step are None, get defaults from configuration.
+        if start is None:
+            start = self["start"]
+        if end is None:
+            end = self["end"]
+        if step is None:
+            step = self["step"]
 
         self._debugging = debug
 
@@ -335,9 +338,11 @@ class Autofocus(ChimeraObject, IAutofocus):
             if minmax:
                 self.log.debug("Minmax filtering FWHM (%.3f,%.3f)" % minmax)
 
-            fit = FocusFit.fit(N.array(valid_positions), N.array(fwhm),
-                               temperature=focuser.getTemperature(),
-                               minmax=minmax)
+            try:
+                temperature = focuser.getTemperature()
+            except NotImplementedError:
+                temperature = None
+            fit = FocusFit.fit(N.array(valid_positions), N.array(fwhm), temperature=temperature, minmax=minmax)
         except Exception, e:
             focuser.moveTo(initial_position)
 
