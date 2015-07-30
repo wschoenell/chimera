@@ -6,7 +6,6 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relation, backref
 
 engine = create_engine('sqlite:///%s' % DEFAULT_PROGRAM_DATABASE, echo=False)
-print '-- engine created with sqlite:///%s' % DEFAULT_PROGRAM_DATABASE
 metaData = MetaData()
 metaData.bind = engine
 
@@ -17,8 +16,7 @@ import datetime as dt
 
 class Targets(Base):
     __tablename__ = "targets"
-    print "model.py"
-    
+
     id     = Column(Integer, primary_key=True)
     name   = Column(String, default="Program") 
     type   = Column(String, default=None) 
@@ -40,8 +38,7 @@ class Targets(Base):
 
 class Program(Base):
     __tablename__ = "program"
-    print "model.py"
-    
+
     id     = Column(Integer, primary_key=True)
     tid    = Column(Integer, ForeignKey('targets.id'))
     name   = Column(String, ForeignKey("targets.name"))
@@ -76,16 +73,17 @@ class AutoFocus(Action):
     __mapper_args__ = {'polymorphic_identity': 'AutoFocus'}
 
     id     = Column(Integer, ForeignKey('action.id'), primary_key=True)
-    start   = Column(Integer, default=0)
-    end     = Column(Integer, default=1)
-    step    = Column(Integer, default=1)
+    start   = Column(Integer, default=None)
+    end     = Column(Integer, default=None)
+    step    = Column(Integer, default=None)
     filter  = Column(String, default=None)
     exptime = Column(Float, default=1.0)
     binning = Column(String, default=None)
     window  = Column(String, default=None)
 
     def __str__ (self):
-        return "autofocus: start=%d end=%d step=%d exptime=%d" % (self.start, self.end, self.step, self.exptime)
+        return "autofocus: exptime=%s. Optionals: start=%s end=%s step=%s" % (self.exptime, self.end, self.step,
+                                                                              self.start)
     
 class PointVerify(Action):
     __tablename__ = "action_pv"

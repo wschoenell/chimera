@@ -19,22 +19,21 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 # 02110-1301, USA.
 
-from chimera.core.cli import ChimeraCLI, action
-from chimera.core.constants import DEFAULT_PROGRAM_DATABASE
-from chimera.core.callback import callback
-from chimera.util.position import Position
-from chimera.util.output import blue, green, red
-
-from chimera.controllers.scheduler.status import SchedulerStatus
-from chimera.controllers.scheduler.states import State
-from chimera.controllers.scheduler.model import (Session, Program, Point,
-                                                 Expose, PointVerify, AutoFocus)
-
 import re
 import sys
 import os
 import shutil
 import time
+
+from chimera.core.cli import ChimeraCLI, action
+from chimera.core.constants import DEFAULT_PROGRAM_DATABASE
+from chimera.core.callback import callback
+from chimera.util.position import Position
+from chimera.util.output import blue, green, red
+from chimera.controllers.scheduler.status import SchedulerStatus
+from chimera.controllers.scheduler.states import State
+from chimera.controllers.scheduler.model import (Session, Program, Point,
+                                                 Expose, AutoFocus)
 
 
 class ChimeraSched (ChimeraCLI):
@@ -55,6 +54,7 @@ class ChimeraSched (ChimeraCLI):
         # RA      dec       epoch  type    name  N*(f1:t1:n1, f2:t2:n2, ......)
         14:00:00 -30:00:00  J2000  OBJECT  obj1  2*(V:7, R:6:2, B:5:2)
         15:00:00 -30:00:00  NOW    OBJECT  obj2  2*(V:7, R:6:2, B:5:2)
+        15:00:00 -30:00:00  NOW    AUTOFOCUS  obj2  1*(V:7)
 
         # special targets follow different format
         # for bias and dark, filter is ignored, we use same format just to keep it simple
@@ -125,7 +125,7 @@ class ChimeraSched (ChimeraCLI):
             matchs = lineRe.search(line)
 
             if matchs is None:
-                print "Couldn't process line #%d" % i
+                self.out(red("Couldn't process line #%d." % i))
                 continue
 
             params = matchs.groupdict()
@@ -139,6 +139,10 @@ class ChimeraSched (ChimeraCLI):
 
             imagetype = params['imagetype'].upper()
             objname = params['objname'].replace("\"", "")
+
+            if imagetype not in ("OBJECT", "FLAT", "BIAS", "DARK", "AUTOFOCUS"):
+                self.out(red("Skipping line %i: Image type not recognized." % (i + 1)))
+                continue
 
             multiplier, exps = params['exposures'].split("*")
             try:
@@ -189,16 +193,18 @@ class ChimeraSched (ChimeraCLI):
                     if imagetype in ("BIAS", "DARK"):
                         filter = None
 
-                    self.out("%s %s %s filter=%s exptime=%s frames=%s" % (
-                        imagetype, objname, str(position), filter, exptime, frames))
+                    if imagetype == "AUTOFOCUS":
+                        if position:
+                            program.actions.append(Point(targetRaDec=position))
+                        else:
+                            program.actions.append(Point(targetName=objname))
+                        program.actions.append(AutoFocus(filter=filter, exptime=exptime))
 
-                    program.actions.append(Expose(shutter=shutter,
-                                                  filename="%s-$DATE-$TIME" % objname.replace(
-                                                      " ", ""),
-                                                  filter=filter,
-                                                  frames=frames,
-                                                  exptime=exptime,
-                                                  imageType=imagetype,
+                    self.out("%s %s %s filter=%s exptime=%s frames=%s" % (imagetype, objname, str(position), filter,
+                                                                          exptime, frames))
+
+                    program.actions.append(Expose(shutter=shutter, filename="%s-$DATE-$TIME" % objname.replace(" ", ""),
+                                                  filter=filter, frames=frames, exptime=exptime, imageType=imagetype,
                                                   objectName=objname))
                 self.out("")
                 programs.append(program)
