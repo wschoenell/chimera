@@ -20,6 +20,7 @@
 # 02110-1301, USA.
 
 import re
+import string
 import sys
 import os
 import shutil
@@ -69,13 +70,12 @@ class ChimeraSched (ChimeraCLI):
         self.addHelpGroup("DB", databaseHelp)
         self.addHelpGroup("RUN", "Start/Stop/Info")
 
-        self.addParameters(dict(name="filename",
-                                long="file",
-                                short="f",
-                                helpGroup="DB",
-                                default="",
-                                help="Filename of the input database.",
-                                metavar="FILENAME"))
+        self.addParameters(dict(name="filename", long="file", short="f", helpGroup="DB", default="",
+                                help="Filename of the input database.", metavar="FILENAME"))
+
+        self.addParameters(dict(name="image_filename", long="image_fileame", short="o", helpGroup="DB",
+                                default="${OBJNAME}-${DATE}-${TIME}", help="Output image filename style.",
+                                metavar="IMAGE_FILENAME"))
 
     @action(long="new",
             help="Generate a new database from a text file (excluding all programs already in database)",
@@ -103,7 +103,6 @@ class ChimeraSched (ChimeraCLI):
         self.generateDatabase(options)
 
     def generateDatabase(self, options):
-        f = None
         try:
             f = open(options.filename, "r")
         except:
@@ -113,6 +112,9 @@ class ChimeraSched (ChimeraCLI):
 
         lineRe = re.compile('(?P<coord>(?P<ra>[\d:-]+)\s+(?P<dec>\+?[\d:-]+)\s+(?P<epoch>[\dnowNOWJjBb\.]+)\s+)?(?P<imagetype>[\w]+)'
                             '\s+(?P<objname>\'([^\\n\'\\\\]|\\\\.)*\'|"([^\\n"\\\\]|\\\\.)*"|([^ \\n"\\\\]|\\\\.)*)\s+(?P<exposures>[\w\d\s:\*\(\),]*)')
+
+        image_name = string.Template(options.image_filename)
+
         programs = []
 
         for i, line in enumerate(f):
@@ -204,9 +206,10 @@ class ChimeraSched (ChimeraCLI):
                                                                           exptime, frames))
 
                     if imagetype != "AUTOFOCUS":
-                        program.actions.append(
-                            Expose(shutter=shutter, filename="%s-$DATE-$TIME" % objname.replace(" ", ""), filter=filter,
-                                   frames=frames, exptime=exptime, imageType=imagetype, objectName=objname))
+                        program.actions.append(Expose(shutter=shutter,
+                                                      filename=image_name.safe_substitute({"OBJNAME": objname}),
+                                                      filter=filter, frames=frames, exptime=exptime, imageType=imagetype,
+                                                      objectName=objname))
                 self.out("")
                 programs.append(program)
 
