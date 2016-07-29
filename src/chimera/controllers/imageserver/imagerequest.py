@@ -1,13 +1,11 @@
 import logging
-
-from chimera.interfaces.camera import (Shutter, Bitpix)
+from chimera.interfaces.camera import Shutter, Bitpix
 from chimera.core.exceptions import ChimeraValueError, ObjectNotFoundException
-#import chimera.core.log
+
 log = logging.getLogger(__name__)
 
 
-class ImageRequest (dict):
-
+class ImageRequest(dict):
     valid_keys = ['exptime', 'frames',
                   'interval', 'shutter',
                   'binning', 'window',
@@ -123,22 +121,25 @@ class ImageRequest (dict):
         self._fetchPostHeaders(manager)
 
     def _fetchPreHeaders(self, manager):
-        auto = []
+        auto_main = []
+        auto_secondary = dict()
         if self.auto_collect_metadata:
             for cls in ('Site', 'Camera', 'Dome', 'FilterWheel', 'Focuser', 'Telescope', 'WeatherStation'):
                 locations = manager.getResourcesByClass(cls)
                 if len(locations) == 1:
-                    auto.append(str(locations[0]))
+                    auto_main.append(str(locations[0]))
                 elif len(locations) == 0:
                     log.warning(
                         "No %s available, header would be incomplete." % cls)
                 else:
                     log.warning(
-                        "More than one %s available, header may be incorrect. Using the first %s." %
-                        (cls, cls))
-                    auto.append(str(locations[0]))
+                        "More than one %s available. Will append an integer at end of the ramaining %s headers." % (
+                        cls, cls))
+                    auto_main.append(str(locations[0]))
+                    auto_secondary.update({str(locations[i]): i for i in range(1, len(locations))})
 
-            self._getHeaders(manager, auto + self.metadataPre)
+            self._getHeaders(manager, auto_main + self.metadataPre)
+            self._getSecondaryHeaders(manager, auto_secondary)
 
     def _fetchPostHeaders(self, manager):
         self._getHeaders(manager, self.metadataPost)
@@ -154,3 +155,30 @@ class ImageRequest (dict):
                     log.exception('Unable to get metadata from %s' % (location))
 
             self.headers += self._proxies[location].getMetadata(self)
+
+    def _getSecondaryHeaders(self, manager, locations):
+        """
+        Fixes metadata of instruments that are not unique by appending an integer to all keywords
+        :param manager: Manager
+        :param locations: dict
+        """
+
+        for location in locations:
+
+            if not location in self._proxies:
+                try:
+                    self._proxies[location] = manager.getProxy(location)
+                except Exception:
+                    log.exception('Unable to get metadata from %s' % location)
+
+            md = self._proxies[location].getMetadata(self)
+            md_fixed = list()
+
+            for keyword in md:
+                # Python tuples does not support item assignment, so I do this ugly trick converting to list then
+                # back to tuple
+                keyword = list(keyword)
+                keyword[0] += str(locations[location])
+                md_fixed.append(tuple(keyword))
+
+            self.headers += md_fixed
