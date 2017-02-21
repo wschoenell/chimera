@@ -1,28 +1,24 @@
 from __future__ import division
-
 from chimera.core.chimeraobject import ChimeraObject
 from chimera.core.lock import lock
 from chimera.core.exceptions import ChimeraException, ClassLoaderException
 from chimera.core.constants import SYSTEM_CONFIG_DIRECTORY
-
 from chimera.interfaces.autofocus import Autofocus as IAutofocus
 from chimera.interfaces.autofocus import StarNotFoundException, FocusNotFoundException
 from chimera.interfaces.focuser import InvalidFocusPositionException
-
 from chimera.controllers.imageserver.imagerequest import ImageRequest
-from chimera.controllers.imageserver.util         import getImageServer
-
+from chimera.controllers.imageserver.util import getImageServer
 import ntpath
-
 from chimera.util.image import Image, ImageUtil
 from chimera.util.output import red, green
-
 import numpy as N
 import yaml
 
 plot = True
 try:
     import pylab as P
+
+    P.switch_backend('Agg')
 except (ImportError, RuntimeError, ClassLoaderException):
     plot = False
 
@@ -33,7 +29,6 @@ import logging
 
 
 class FocusFit(object):
-
     def __init__(self):
 
         # input
@@ -50,8 +45,8 @@ class FocusFit(object):
         self.fwhm_fit = None
         self.err = 1e20
 
-    best_focus = property(lambda self: (-self.B / (2*self.A),
-                                       (-self.B**2 + 4*self.A*self.C) / (4*self.A)))
+    best_focus = property(lambda self: (-self.B / (2 * self.A),
+                                        (-self.B ** 2 + 4 * self.A * self.C) / (4 * self.A)))
 
     def plot(self, filename):
 
@@ -90,7 +85,7 @@ class FocusFit(object):
         log.close()
 
     def __iter__(self):
-        return(self.A, self.B, self.C).__iter__()
+        return (self.A, self.B, self.C).__iter__()
 
     def __cmp__(self, other):
         if isinstance(other, FocusFit):
@@ -116,7 +111,7 @@ class FocusFit(object):
 
         fwhm_fit = N.polyval([A, B, C], position)
 
-        err = sqrt(sum((fwhm_fit - fwhm)**2) / len(position))
+        err = sqrt(sum((fwhm_fit - fwhm) ** 2) / len(position))
 
         fit = FocusFit()
         fit.position = position
@@ -130,8 +125,8 @@ class FocusFit(object):
 
         return fit
 
-class Autofocus(ChimeraObject, IAutofocus):
 
+class Autofocus(ChimeraObject, IAutofocus):
     """
     Auto focuser
     ============
@@ -199,8 +194,8 @@ class Autofocus(ChimeraObject, IAutofocus):
 
     @lock
     def focus(self, filter=None, exptime=None, binning=None, window=None,
-               start=2000, end=6000, step=500,
-               minmax=(0,30), debug=False):
+              start=2000, end=6000, step=500,
+              minmax=(0, 30), debug=False):
 
         self._debugging = debug
 
@@ -221,7 +216,7 @@ class Autofocus(ChimeraObject, IAutofocus):
 
             debug_file.close()
 
-        positions = N.arange(start, end+1, step)
+        positions = N.arange(start, end + 1, step)
 
         if not debug:
             # save parameter to ease a debug run later
@@ -233,15 +228,15 @@ class Autofocus(ChimeraObject, IAutofocus):
             except IOError:
                 self.log.warning("Cannot save debug information. Debug will be a little harder later.")
 
-        self.log.debug("="*40)
+        self.log.debug("=" * 40)
         self.log.debug("[%s] Starting autofocus run." % time.strftime("%c"))
-        self.log.debug("="*40)
+        self.log.debug("=" * 40)
         self.log.debug("Focus range: start=%d end=%d step=%d points=%d" % (start, end, step, len(positions)))
 
         # images for debug mode
         if debug:
             self._debug_images = ["%s/focus-%04d.fits" % (debug, i)
-                                   for i in range(1, len(positions)+2)]
+                                  for i in range(1, len(positions) + 2)]
 
         self.imageRequest = ImageRequest()
         self.imageRequest["exptime"] = exptime or 10
@@ -263,19 +258,28 @@ class Autofocus(ChimeraObject, IAutofocus):
 
         # 1. Find best star to focus on this field
 
-        star_found = self._findBestStarToFocus(self._takeImageAndResolveStars())
+        stars, frame_path = self._takeImageAndResolveStars()
+        star_found = self._findBestStarToFocus(stars)
 
         if not star_found:
 
             tries = 0
 
             while not star_found and tries < self["max_tries"]:
-                star_found = self._findBestStarToFocus(self._takeImageAndResolveStars())
+                stars, frame_path = self._takeImageAndResolveStars()
+                star_found = self._findBestStarToFocus(stars)
                 tries += 1
 
             if not star_found:
                 raise StarNotFoundException("Couldn't find a suitable star to focus on."
                                             "Giving up after %d tries." % tries)
+
+        star_found["CHIMERA_FLAGS"] = green("OK")
+
+        self.stepComplete(self.getFocuser().getPosition(), star_found, frame_path)
+
+        self.imageRequest['window'] = '%d:%d,%d:%d' % (star_found['XWIN_IMAGE'] - 100, star_found['XWIN_IMAGE'] + 100,
+                                                       star_found['YWIN_IMAGE'] - 100, star_found['YWIN_IMAGE'] + 100)
 
         try:
             fit = self._fitFocus(positions, minmax)
@@ -313,23 +317,85 @@ class Autofocus(ChimeraObject, IAutofocus):
             stars = self._findStars(frame_path)
             star = self._findBrighterStar(stars)
 
+            self.log.debug('star >>>' + str(star))
+
+            if not star:
+                star = {"CHIMERA_FLAGS": red("NONE STAR FOUND"), "XWIN_IMAGE": 0, "YWIN_IMAGE": 0,
+                        "FWHM_IMAGE": 0, "FLUX_BEST": 0}
+                self.stepComplete(position, star, frame_path)
+                continue
+
             star["CHIMERA_FLAGS"] = green("OK")
 
             if abs(star["FWHM_IMAGE"] - 4.18) <= 0.02:
-                self.log.debug("Ignoring star at (X,Y)=(%d,%d) FWHM magic number=%.3f, FLUX=%.3f" % (star["XWIN_IMAGE"], star["YWIN_IMAGE"],
-                                                                                                     star["FWHM_IMAGE"], star["FLUX_BEST"]))
+                self.log.debug("Ignoring star at (X,Y)=(%d,%d) FWHM magic number=%.3f, FLUX=%.3f" % (
+                star["XWIN_IMAGE"], star["YWIN_IMAGE"],
+                star["FWHM_IMAGE"], star["FLUX_BEST"]))
                 star["CHIMERA_FLAGS"] = red("Ignoring, SExtractor FWHM magic number.")
             elif star["FWHM_IMAGE"] <= minmax[0] or star["FWHM_IMAGE"] >= minmax[1]:
-                self.log.debug("Ignoring star at (X,Y)=(%d,%d) FWHM magic number=%.3f, FLUX=%.3f" % (star["XWIN_IMAGE"], star["YWIN_IMAGE"],
-                                                                                                     star["FWHM_IMAGE"], star["FLUX_BEST"]))
+                self.log.debug("Ignoring star at (X,Y)=(%d,%d) FWHM magic number=%.3f, FLUX=%.3f" % (
+                star["XWIN_IMAGE"], star["YWIN_IMAGE"],
+                star["FWHM_IMAGE"], star["FLUX_BEST"]))
                 star["CHIMERA_FLAGS"] = red("Ignoring, FWHM above/below minmax limits.")
             else:
-                self.log.debug("Adding star to curve. (X,Y)=(%d,%d) FWHM=%.3f FLUX=%.3f" % (star["XWIN_IMAGE"], star["YWIN_IMAGE"],
-                                                                                            star["FWHM_IMAGE"], star["FLUX_BEST"]))
+                self.log.debug(
+                    "Adding star to curve. (X,Y)=(%d,%d) FWHM=%.3f FLUX=%.3f" % (star["XWIN_IMAGE"], star["YWIN_IMAGE"],
+                                                                                 star["FWHM_IMAGE"], star["FLUX_BEST"]))
                 fwhm.append(star["FWHM_IMAGE"])
                 valid_positions.append(position)
 
             self.stepComplete(position, star, frame_path)
+
+        dp = positions[-1] - positions[-2]
+        new_positions = [int(x) for x in
+                         N.linspace(valid_positions[N.argmin(fwhm)] - 5 * dp, valid_positions[N.argmin(fwhm)] + 5 * dp,
+                                    10)]
+        # new_positions = new_positions[new_positions < self.getFocuser().getRange()[1]]
+
+        fwhm = []
+        valid_positions = []
+
+        for i, position in enumerate(new_positions):
+
+            self.log.debug("Moving focuser to %d" % int(position))
+
+            focuser.moveTo(position)
+
+            frame_path, frame = self._takeImage()
+            stars = self._findStars(frame_path)
+            star = self._findBrighterStar(stars)
+
+            self.log.debug('star >>>' + str(star))
+
+            if not star:
+                star = {"CHIMERA_FLAGS": red("NONE STAR FOUND"), "XWIN_IMAGE": 0, "YWIN_IMAGE": 0,
+                        "FWHM_IMAGE": 0, "FLUX_BEST": 0}
+                self.stepComplete(position, star, frame_path)
+                continue
+
+            star["CHIMERA_FLAGS"] = green("OK")
+
+            if abs(star["FWHM_IMAGE"] - 4.18) <= 0.02:
+                self.log.debug("Ignoring star at (X,Y)=(%d,%d) FWHM magic number=%.3f, FLUX=%.3f" % (
+                star["XWIN_IMAGE"], star["YWIN_IMAGE"],
+                star["FWHM_IMAGE"], star["FLUX_BEST"]))
+                star["CHIMERA_FLAGS"] = red("Ignoring, SExtractor FWHM magic number.")
+            elif star["FWHM_IMAGE"] <= minmax[0] or star["FWHM_IMAGE"] >= minmax[1]:
+                self.log.debug("Ignoring star at (X,Y)=(%d,%d) FWHM magic number=%.3f, FLUX=%.3f" % (
+                star["XWIN_IMAGE"], star["YWIN_IMAGE"],
+                star["FWHM_IMAGE"], star["FLUX_BEST"]))
+                star["CHIMERA_FLAGS"] = red("Ignoring, FWHM above/below minmax limits.")
+            else:
+                self.log.debug(
+                    "Adding star to curve. (X,Y)=(%d,%d) FWHM=%.3f FLUX=%.3f" % (star["XWIN_IMAGE"], star["YWIN_IMAGE"],
+                                                                                 star["FWHM_IMAGE"], star["FLUX_BEST"]))
+                fwhm.append(star["FWHM_IMAGE"])
+                valid_positions.append(position)
+
+            self.stepComplete(position, star, frame_path)
+
+        args = N.argsort(valid_positions)
+        valid_positions, fwhm = N.array(valid_positions)[args], N.array(fwhm)[args]
 
         # fit a parabola to the points and save parameters
         try:
@@ -340,7 +406,7 @@ class Autofocus(ChimeraObject, IAutofocus):
                 temp = focuser.getTemperature()
             except NotImplementedError:
                 temp = None
-            fit = FocusFit.fit(N.array(valid_positions), N.array(fwhm), temperature=temp, minmax=minmax)
+            fit = FocusFit.fit(valid_positions, fwhm, temperature=temp, minmax=minmax)
         except Exception, e:
             focuser.moveTo(initial_position)
 
@@ -353,7 +419,8 @@ class Autofocus(ChimeraObject, IAutofocus):
         # leave focuser at best position
         try:
             if N.isnan(fit.best_focus[0]):
-                raise FocusNotFoundException("Focus fitting error: fitting do not converges (NaN result). See logs for more info.")
+                raise FocusNotFoundException(
+                    "Focus fitting error: fitting do not converges (NaN result). See logs for more info.")
 
             self.log.debug("Best focus position: %.3f" % fit.best_focus[0])
             focuser.moveTo(int(fit.best_focus[0]))
@@ -370,7 +437,7 @@ class Autofocus(ChimeraObject, IAutofocus):
         frame_path, frame = self._takeImage()
         stars = self._findStars(frame_path)
 
-        return stars
+        return stars, frame_path
 
     def _takeImage(self):
 
@@ -384,6 +451,8 @@ class Autofocus(ChimeraObject, IAutofocus):
                 return srv.register(img)
             except IndexError:
                 raise ChimeraException("Cannot find debug images")
+
+        self.log.debug('Window %s' % self.imageRequest['window'])
 
         self.imageRequest["filename"] = os.path.basename(ImageUtil.makeFilename("focus-$DATE"))
 
@@ -421,7 +490,7 @@ class Autofocus(ChimeraObject, IAutofocus):
         frame = Image.fromFile(frame_path)
 
         config = {}
-        config['PIXEL_SCALE'] = 0  # use WCS info
+        config['PIXEL_SCALE'] = 0.46  # use WCS info
         config['BACK_TYPE'] = "AUTO"
 
         # CCD saturation level in ADUs.
@@ -431,6 +500,9 @@ class Autofocus(ChimeraObject, IAutofocus):
 
         # improve speed with higher threshold
         config['DETECT_THRESH'] = 3.0
+
+        config['DETECT_MINAREA'] = 20
+        # config["DEBLEND_MINCONT"] = 0.0005
 
         # no output, please
         config['VERBOSE_TYPE'] = "QUIET"
@@ -464,7 +536,10 @@ class Autofocus(ChimeraObject, IAutofocus):
 
 
 if __name__ == "__main__":
-
     x = Autofocus()
     # x.checkPointing()
     x._takeImage()
+
+
+
+
