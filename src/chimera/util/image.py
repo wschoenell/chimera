@@ -172,7 +172,7 @@ class Image(DictMixin, RemoteObject):
 
     @staticmethod
     def fromFile(filename, fix=False, mode="update"):
-        fd = fits.open(filename, mode=mode)
+        fd = fits.open(filename, mode=mode, lazy_load_hdus=False)
         img = Image(filename, fd)
 
         if fix:
@@ -214,6 +214,7 @@ class Image(DictMixin, RemoteObject):
                 filename = os.path.splitext(filename)[0] + ".fz"
                 img = fits.CompImageHDU(data=data, header=hdu.header, compression_type='RICE_1')
                 img.writeto(filename, checksum=True)
+                del img
                 return Image.fromFile(filename)
             
         hdu.data = data
@@ -256,12 +257,15 @@ class Image(DictMixin, RemoteObject):
     # we close before pickle and reopen after it
     #
     def __getstate__(self):
-        self._fd.close()
+        try:
+            self._fd.close()
+        except ValueError:
+            pass
         return self.__dict__
 
     def __setstate__(self, args):
         self.__dict__ = args
-        self._fd = fits.open(self._filename, mode="update")
+        self._fd = fits.open(self._filename, mode="update", lazy_load_hdus=False)
 
     #
     # geometry

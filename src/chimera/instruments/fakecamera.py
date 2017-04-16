@@ -241,7 +241,7 @@ class FakeCamera (CameraBase, FilterWheelBase):
                                 "download took: %.3f s" % (time.time() - t0))
                             fitsfile = dssfile + ".fits.gz"
                             shutil.copy(dssfile, fitsfile)
-                            hdulist = fits.open(fitsfile)
+                            hdulist = fits.open(fitsfile, lazy_load_hdus=False)
                             pix = hdulist[0].data
                             hdulist.close()
                             os.remove(fitsfile)
