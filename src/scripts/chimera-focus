@@ -18,22 +18,19 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 # 02110-1301, USA.
-
-
-from chimera.core.cli import ChimeraCLI, action, parameter, ParameterType
-from chimera.core.callback import callback
-
-from chimera.interfaces.autofocus import StarNotFoundException, FocusNotFoundException
-from chimera.interfaces.focuser import InvalidFocusPositionException, FocuserFeature, FocuserAxis, ControllableAxis
-from chimera.interfaces.filterwheel import InvalidFilterPositionException
-from chimera.util.sextractor import SExtractorException
-
-from chimera.util.ds9 import DS9
-
-import sys
-import time
+import copy
 import os
 import re
+import sys
+import time
+
+from chimera.core.callback import callback
+from chimera.core.cli import ChimeraCLI, action, parameter, ParameterType
+from chimera.interfaces.autofocus import StarNotFoundException, FocusNotFoundException
+from chimera.interfaces.filterwheel import InvalidFilterPositionException
+from chimera.interfaces.focuser import InvalidFocusPositionException, FocuserFeature, FocuserAxis, ControllableAxis
+from chimera.util.ds9 import DS9
+from chimera.util.sextractor import SExtractorException
 
 
 class ChimeraFocus (ChimeraCLI):
@@ -219,16 +216,9 @@ class ChimeraFocus (ChimeraCLI):
         @callback(self.localManager)
         def stepComplete(position, star, filename):
 
-            self.out("#%04d (%4d, %4d) FWHM: %8.3f FLUX: %-9.3f (%s)" % (position,
-                                                                         star["XWIN_IMAGE"], star[
-                                                                             "YWIN_IMAGE"],
-                                                                         star["FWHM_IMAGE"], star[
-                                                                             "FLUX_BEST"],
-                                                                         star["CHIMERA_FLAGS"]))
+            self.out("#%04d FWHM: %8.3f (%s)" % (position, star["FWHM"], star["CHIMERA_FLAGS"]))
             if ds9:
                 ds9.displayFile(filename)
-                ds9.set("regions command { circle %d %d %d}" % (
-                    int(star["XWIN_IMAGE"]), int(star["YWIN_IMAGE"]), int(star["FWHM_IMAGE"])))
                 ds9.set("zoom to fit")
                 ds9.set("scale mode zscale")
                 
@@ -295,6 +285,11 @@ class ChimeraFocus (ChimeraCLI):
                 self.out('\tRange %s: %s' % (ControllableAxis[ax], self.focuser.getRange(ControllableAxis[ax])))
 
         return
+
+    def __abort__(self):
+        self.out("\naborting... ", endl="")
+        autofocus = copy.copy(self.autofocus)
+        autofocus.abort()
 
 
 def main():
