@@ -4,6 +4,7 @@ from rich import print
 from chimera.core.proxy import Proxy
 from chimera.core.location import Location
 
+
 def test_proxy_bench():
     telescope = Proxy(Location(host="127.0.0.1", port=8088, cls="FakeTelescope", name="0"))
 
@@ -11,7 +12,7 @@ def test_proxy_bench():
     # p = telescope.getPositionRaDec()
     # # inspect(p)
 
-    N = 10000 
+    N = 10000
 
     t0 = time.time()
 

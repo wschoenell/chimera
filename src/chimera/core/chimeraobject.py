@@ -35,17 +35,17 @@ from chimera.core.constants import RWLOCK_ATTRIBUTE_NAME
 
 from chimera.interfaces.lifecycle import ILifeCycle
 
-#import chimera.core.log
+# import chimera.core.log
 
 import logging
 import time
 import threading
 
 
-__all__ = ['ChimeraObject']
+__all__ = ["ChimeraObject"]
 
 
-class ChimeraObject (ILifeCycle, metaclass=MetaObject):
+class ChimeraObject(ILifeCycle, metaclass=MetaObject):
 
     def __init__(self):
         ILifeCycle.__init__(self)

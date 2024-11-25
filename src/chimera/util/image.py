@@ -37,10 +37,7 @@ class ImageUtil(object):
         return datetime.strftime("%Y-%m-%dT%H:%M:%S.%f")
 
     @staticmethod
-    def makeFilename(path='$DATE-$TIME',
-                     subs={},
-                     dateFormat="%Y%m%d",
-                     timeFormat="%H%M%S"):
+    def makeFilename(path="$DATE-$TIME", subs={}, dateFormat="%Y%m%d", timeFormat="%H%M%S"):
         """
         Helper method to create filenames with increasing sequence number
         appended.
@@ -78,9 +75,11 @@ class ImageUtil(object):
         else:
             jd_day = localtime
 
-        subs_dict = {"LAST_NOON_DATE": jd_day.strftime(dateFormat),
-                     "DATE": utctime.strftime(dateFormat),
-                     "TIME": utctime.strftime(timeFormat)}
+        subs_dict = {
+            "LAST_NOON_DATE": jd_day.strftime(dateFormat),
+            "DATE": utctime.strftime(dateFormat),
+            "TIME": utctime.strftime(timeFormat),
+        }
 
         # add any user-specific keywords
         subs_dict.update(subs)
@@ -109,8 +108,7 @@ class ImageUtil(object):
             os.makedirs(dirname)
 
         if not os.path.isdir(dirname):
-            raise OSError(
-                "A file with the same name as the desired directory already exists. ('%s')" % dirname)
+            raise OSError("A file with the same name as the desired directory already exists. ('%s')" % dirname)
 
         # If filename exists, append -NNN to the end of the file name.
         # A maximum of 1000 files can be generated with the same filename.
@@ -188,18 +186,21 @@ class Image(UserDict):
                 filename = imageRequest["filename"]
             except KeyError:
                 if not filename:
-                    raise TypeError("Invalid filename, you must pass filename=something"
-                                    "or a valid ImageRequest object")
+                    raise TypeError(
+                        "Invalid filename, you must pass filename=something" "or a valid ImageRequest object"
+                    )
 
         filename = ImageUtil.makeFilename(filename)
 
-        headers = [("DATE", ImageUtil.formatDate(dt.datetime.utcnow()), "date of file creation"),
-                   ("AUTHOR", _chimera_name_, 'author of the data'),
-                   ("FILENAME", os.path.basename(filename), "name of the file")]
+        headers = [
+            ("DATE", ImageUtil.formatDate(dt.datetime.utcnow()), "date of file creation"),
+            ("AUTHOR", _chimera_name_, "author of the data"),
+            ("FILENAME", os.path.basename(filename), "name of the file"),
+        ]
 
         hdu = fits.PrimaryHDU()
         # TODO: Implement BITPIX support
-        hdu.scale('int16', '', bzero=32768, bscale=1)
+        hdu.scale("int16", "", bzero=32768, bscale=1)
 
         if imageRequest:
             headers += imageRequest.headers
@@ -210,9 +211,9 @@ class Image(UserDict):
                 except Exception as e:
                     log.warning("Couldn't add %s: %s" % (str(h), str(e)))
 
-            if imageRequest['compress_format'] == 'fits_rice':
+            if imageRequest["compress_format"] == "fits_rice":
                 filename = os.path.splitext(filename)[0] + ".fz"
-                img = fits.CompImageHDU(data=data, header=hdu.header, compression_type='RICE_1')
+                img = fits.CompImageHDU(data=data, header=hdu.header, compression_type="RICE_1")
                 img.writeto(filename, checksum=True)
                 return Image.fromFile(filename)
 
@@ -321,8 +322,7 @@ class Image(UserDict):
             try:
                 self._wcs = wcs.WCS(self._fd["PRIMARY"].header)
             except (KeyError, ValueError) as e:
-                raise WCSNotFoundException(
-                    "Couldn't find WCS information on %s ('%s')" % (self._filename, e))
+                raise WCSNotFoundException("Couldn't find WCS information on %s ('%s')" % (self._filename, e))
 
         return True
 
@@ -362,15 +362,12 @@ class Image(UserDict):
         sex = SExtractor()
 
         # default params
-        sex.config['PIXEL_SCALE'] = 0.45
-        sex.config['BACK_TYPE'] = "AUTO"
-        sex.config['SATUR_LEVEL'] = 60000
-        sex.config['DETECT_THRESH'] = 3.0
-        sex.config['VERBOSE_TYPE'] = "QUIET"
-        sex.config['PARAMETERS_LIST'] = ["NUMBER",
-                                         "XWIN_IMAGE", "YWIN_IMAGE",
-                                         "FLUX_BEST", "FWHM_IMAGE",
-                                         "FLAGS"]
+        sex.config["PIXEL_SCALE"] = 0.45
+        sex.config["BACK_TYPE"] = "AUTO"
+        sex.config["SATUR_LEVEL"] = 60000
+        sex.config["DETECT_THRESH"] = 3.0
+        sex.config["VERBOSE_TYPE"] = "QUIET"
+        sex.config["PARAMETERS_LIST"] = ["NUMBER", "XWIN_IMAGE", "YWIN_IMAGE", "FLUX_BEST", "FWHM_IMAGE", "FLAGS"]
 
         # update values from user params
         sex.config.update(params)
@@ -382,9 +379,9 @@ class Image(UserDict):
             return result
         finally:
             if saveCatalog:
-                shutil.move(sex.config['CATALOG_NAME'], saveCatalog)
+                shutil.move(sex.config["CATALOG_NAME"], saveCatalog)
             if saveConfig:
-                shutil.move(sex.config['CONFIG_FILE'], saveConfig)
+                shutil.move(sex.config["CONFIG_FILE"], saveConfig)
 
             sex.clean(config=True, catalog=True, check=True)
 
@@ -393,9 +390,9 @@ class Image(UserDict):
     #
 
     def fix(self):
-        self._fd.verify('fix')
+        self._fd.verify("fix")
 
-    def save(self, filename=None, verify='exception'):
+    def save(self, filename=None, verify="exception"):
 
         if filename:
             self._fd.writeto(filename, output_verify=verify)
@@ -406,27 +403,27 @@ class Image(UserDict):
 
     def _doCompress(self, filename, format):
         if format.lower() == "bz2":
-            bzfilename = filename + '.bz2'
-            bzfp = bz2.BZ2File(bzfilename, 'wb', compresslevel=4)
+            bzfilename = filename + ".bz2"
+            bzfp = bz2.BZ2File(bzfilename, "wb", compresslevel=4)
             rawfp = open(filename)
             bzfp.write(rawfp.read())
             bzfp.close()
             rawfp.close()
             os.unlink(filename)
         elif format.lower() == "gzip":
-            gzfilename = filename + '.gz'
-            gzfp = gzip.GzipFile(gzfilename, 'wb', compresslevel=5)
+            gzfilename = filename + ".gz"
+            gzfp = gzip.GzipFile(gzfilename, "wb", compresslevel=5)
             rawfp = open(filename)
             gzfp.write(rawfp.read())
             gzfp.close()
             rawfp.close()
             os.unlink(filename)
-        elif format.lower().startswith('fits_'):
+        elif format.lower().startswith("fits_"):
             # compression methods inherent to fits standard, are done when saving image.
             return
         else:  # zip
-            zipfilename = filename + '.zip'
-            zipfp = zipfile.ZipFile(zipfilename, 'w', zipfile.ZIP_DEFLATED)
+            zipfilename = filename + ".zip"
+            zipfp = zipfile.ZipFile(zipfilename, "w", zipfile.ZIP_DEFLATED)
             zipfp.write(filename, os.path.basename(filename))
             zipfp.close()
             os.unlink(filename)
@@ -435,8 +432,8 @@ class Image(UserDict):
 
         if multiprocess and sys.version_info[0:2] >= (2, 6):
             from multiprocessing import Process
-            p = Process(
-                target=self._doCompress, args=(self.filename(), format))
+
+            p = Process(target=self._doCompress, args=(self.filename(), format))
             p.start()
         else:
             self._doCompress(self.filename(), format)

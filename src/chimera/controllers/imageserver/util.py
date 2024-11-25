@@ -1,4 +1,3 @@
-
 from chimera.core.exceptions import ChimeraException, ObjectNotFoundException, ClassLoaderException
 from chimera.core.path import ChimeraPath
 
@@ -6,17 +5,16 @@ from chimera.core.path import ChimeraPath
 def getImageServer(manager):
 
     try:
-        toReturn = manager.getProxy('/ImageServer/0')
+        toReturn = manager.getProxy("/ImageServer/0")
     except ObjectNotFoundException:
         try:
-            toReturn = manager.addLocation(
-                '/ImageServer/imageserver', ChimeraPath().controllers)
+            toReturn = manager.addLocation("/ImageServer/imageserver", ChimeraPath().controllers)
         except Exception as e:
-            print(''.join(Pyro.util.getPyroTraceback(e)))
-            raise ClassLoaderException('Unable to create imageserver')
+            print("".join(Pyro.util.getPyroTraceback(e)))
+            raise ClassLoaderException("Unable to create imageserver")
 
     if not toReturn:
-        raise ClassLoaderException('Unable to create or find an ImageServer')
+        raise ClassLoaderException("Unable to create or find an ImageServer")
 
     return toReturn
 

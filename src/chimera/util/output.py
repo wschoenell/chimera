@@ -101,8 +101,7 @@ def nc_len(mystr):
 def xtermTitle(mystr):
     if havecolor and dotitles and "TERM" in os.environ and sys.stderr.isatty():
         myt = os.environ["TERM"]
-        legal_terms = [
-            "xterm", "Eterm", "aterm", "rxvt", "screen", "kterm", "rxvt-unicode"]
+        legal_terms = ["xterm", "Eterm", "aterm", "rxvt", "screen", "kterm", "rxvt-unicode"]
         for term in legal_terms:
             if myt.startswith(term):
                 sys.stderr.write("\x1b]2;" + str(mystr) + "\x07")
@@ -221,9 +220,8 @@ def update_basic_spinner():
 
 def update_scroll_spinner():
     global spinner, spinpos
-    if(spinpos >= len(spinner)):
-        sys.stdout.write(
-            darkgreen(" \b\b\b" + spinner[len(spinner) - 1 - (spinpos % len(spinner))]))
+    if spinpos >= len(spinner):
+        sys.stdout.write(darkgreen(" \b\b\b" + spinner[len(spinner) - 1 - (spinpos % len(spinner))]))
     else:
         sys.stdout.write(green("\b " + spinner[spinpos]))
     sys.stdout.flush()

@@ -4,30 +4,31 @@ import numpy as N
 import os
 import time
 
-class TestImage (object):
+
+class TestImage(object):
 
     base = os.path.dirname(__file__)
 
-    def test_headers (self):
+    def test_headers(self):
 
         img = Image.fromFile(os.path.join(self.base, "teste-sem-wcs.fits"), fix=False)
 
         print()
 
         for k, v in list(img.items()):
-            print(k,v, type(v))
+            print(k, v, type(v))
 
-    def test_wcs (self):
+    def test_wcs(self):
 
         img = Image.fromFile(os.path.join(self.base, "teste-com-wcs.fits"), fix=False)
-        world =  img.worldAt(0,0)
+        world = img.worldAt(0, 0)
         print("world value at pixel 0,0:", world)
         print("pixel value at world %s:" % world, img.pixelAt(world))
         print("world value at center pix %s:" % str(img.center()), img.worldAt(img.center()))
         assert world.ra.D != None
         assert world.dec.D != None
 
-    def test_extractor (self):
+    def test_extractor(self):
 
         for f in ["teste-com-wcs.fits", "teste-sem-wcs.fits"]:
 
@@ -41,7 +42,7 @@ class TestImage (object):
             for star in stars[:10]:
                 print(star["NUMBER"], star["XWIN_IMAGE"], star["YWIN_IMAGE"], star["FLUX_BEST"])
 
-    def test_make_filename (self):
+    def test_make_filename(self):
 
         names = []
 
@@ -54,15 +55,11 @@ class TestImage (object):
             assert os.path.exists(name)
             os.unlink(name)
 
-    def test_create (self):
+    def test_create(self):
 
-        img = Image.create(N.zeros((100,100)), filename="autogen-teste.fits")
+        img = Image.create(N.zeros((100, 100)), filename="autogen-teste.fits")
         assert os.path.exists(img.filename())
         assert img.width() == 100
         assert img.height() == 100
 
         os.unlink(img.filename())
-
-
-
-

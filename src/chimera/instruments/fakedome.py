@@ -29,7 +29,7 @@ import time
 import threading
 
 
-class FakeDome (DomeBase):
+class FakeDome(DomeBase):
 
     def __init__(self):
         DomeBase.__init__(self)
@@ -51,8 +51,7 @@ class FakeDome (DomeBase):
             az = Coord.fromDMS(az)
 
         if az > 360:
-            raise InvalidDomePositionException("Cannot slew to %s. "
-                                               "Outside azimuth limits." % az)
+            raise InvalidDomePositionException("Cannot slew to %s. " "Outside azimuth limits." % az)
 
         self._abort.clear()
         self._slewing = True

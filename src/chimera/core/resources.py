@@ -2,9 +2,7 @@
 # SPDX-FileCopyrightText: Copyright 2006-2024 Paulo Henrique Silva <ph.silva@gmail.com>
 
 from chimera.core.location import Location
-from chimera.core.exceptions import InvalidLocationException, \
-    ObjectNotFoundException, \
-    ChimeraException
+from chimera.core.exceptions import InvalidLocationException, ObjectNotFoundException, ChimeraException
 
 import time
 import sys
@@ -34,8 +32,7 @@ class ResourcesManager:
         location = self._validLocation(location)
 
         if location in self:
-            raise InvalidLocationException(
-                "Location already on the resource pool.")
+            raise InvalidLocationException("Location already on the resource pool.")
 
         entry = Resource()
         entry.location = location
@@ -102,8 +99,7 @@ class ResourcesManager:
             try:
                 return self._res[instances[index].location]
             except IndexError:
-                raise ObjectNotFoundException(
-                    "Couldn't find %s instance #%d." % (location, index))
+                raise ObjectNotFoundException("Couldn't find %s instance #%d." % (location, index))
         else:
             raise ObjectNotFoundException("Couldn't find %s." % location)
 

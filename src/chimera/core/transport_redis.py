@@ -50,7 +50,11 @@ class RedisTransport(Transport):
 
     def recv_request(self) -> Request | None:
         try:
-            data = self.r.blpop([self.REQUESTS_KEY,])
+            data = self.r.blpop(
+                [
+                    self.REQUESTS_KEY,
+                ]
+            )
             _, request_bytes = data
             return self.serializer.loads(request_bytes)
         except redis.exceptions.ConnectionError:
@@ -62,7 +66,11 @@ class RedisTransport(Transport):
 
     def recv_response(self, request: Request) -> Response | None:
         try:
-            data = self.r.blpop([f"chimera_response_{request.id}",])
+            data = self.r.blpop(
+                [
+                    f"chimera_response_{request.id}",
+                ]
+            )
             _, request_bytes = data
             return self.serializer.loads(request_bytes)
         except redis.exceptions.ConnectionError:

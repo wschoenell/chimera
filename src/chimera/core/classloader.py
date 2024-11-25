@@ -26,12 +26,12 @@ import traceback
 from chimera.core.exceptions import ClassLoaderException
 
 
-class ClassLoader (object):
+class ClassLoader(object):
 
     def __init__(self):
         self._cache = {}
 
-    def loadClass(self, clsname, path=['.']):
+    def loadClass(self, clsname, path=["."]):
         return self._lookupClass(clsname, path)
 
     def _lookupClass(self, clsname, path):
@@ -51,8 +51,7 @@ class ClassLoader (object):
 
         try:
 
-            module = __import__(
-                clsname.lower(), globals(), locals(), [clsname])
+            module = __import__(clsname.lower(), globals(), locals(), [clsname])
 
         except ImportError:
 
@@ -70,17 +69,14 @@ class ClassLoader (object):
 
             # ImportError above
             if tb_size == 1:
-                raise ClassLoaderException(
-                    "Couldn't find module %s (%s)." % (clsname, path))
+                raise ClassLoaderException("Couldn't find module %s (%s)." % (clsname, path))
 
             # ImportError on loaded module
             else:
-                raise ClassLoaderException(
-                    "Module %s found but couldn't be loaded." % clsname)
+                raise ClassLoaderException("Module %s found but couldn't be loaded." % clsname)
 
         except:
-            raise ClassLoaderException(
-                "Module %s found but couldn't be loaded." % clsname)
+            raise ClassLoaderException("Module %s found but couldn't be loaded." % clsname)
 
         # turns sys.path back
         [sys.path.remove(p) for p in path]
@@ -94,8 +90,8 @@ class ClassLoader (object):
 
         if not cls:
             raise ClassLoaderException(
-                "Module found but couldn't fount class on module '%s' (%s)." %
-                (clsname.lower(), module.__file__))
+                "Module found but couldn't fount class on module '%s' (%s)." % (clsname.lower(), module.__file__)
+            )
 
         self._cache[clsname.lower()] = cls
 

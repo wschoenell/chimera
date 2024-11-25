@@ -63,9 +63,7 @@ class Server:
         try:
             method = method_getter(instance)
         except AttributeError:
-            return self.transport.send_response(
-                request, self.protocol.not_found(f"Method {request.method} not found")
-            )
+            return self.transport.send_response(request, self.protocol.not_found(f"Method {request.method} not found"))
 
         try:
             result = method(*request.args, **request.kwargs)

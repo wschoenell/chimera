@@ -12,19 +12,18 @@ except ImportError:
 import ephem
 
 
-__all__ = ['Position']
+__all__ = ["Position"]
 
 
 Epoch = Enum("J2000", "B1950", "NOW")
 System = Enum("CELESTIAL", "GALACTIC", "ECLIPTIC", "TOPOCENTRIC")
 
 
-class PositionOutsideLimitsError (Exception):
+class PositionOutsideLimitsError(Exception):
     pass
 
 
-class Position (object):
-
+class Position(object):
     """Position represents a coordinate pair in a reference frame.
 
     There are five factories available, that can be used to create
@@ -98,15 +97,15 @@ class Position (object):
                     ra = ra.toHMS()
                 except ValueError:
                     raise ValueError(
-                        "Invalid RA coordinate type %s. Expected numbers, strings or Coords." % str(type(ra)))
+                        "Invalid RA coordinate type %s. Expected numbers, strings or Coords." % str(type(ra))
+                    )
 
             Position._checkRange(float(ra), 0, 360)
 
         except ValueError as e:
             raise ValueError("Invalid RA coordinate %s" % str(ra))
         except PositionOutsideLimitsError:
-            raise ValueError(
-                "Invalid RA range %s. Must be between 0-24 hours or 0-360 deg." % str(ra))
+            raise ValueError("Invalid RA range %s. Must be between 0-24 hours or 0-360 deg." % str(ra))
 
         try:
             if type(dec) == str:
@@ -119,15 +118,15 @@ class Position (object):
                     dec = dec.toDMS()
                 except ValueError:
                     raise ValueError(
-                        "Invalid DEC coordinate type %s. Expected numbers, strings or Coords." % str(type(dec)))
+                        "Invalid DEC coordinate type %s. Expected numbers, strings or Coords." % str(type(dec))
+                    )
 
             Position._checkRange(float(dec), -90, 360)
 
         except ValueError as e:
             raise ValueError("Invalid DEC coordinate %s" % str(dec))
         except PositionOutsideLimitsError:
-            raise ValueError(
-                "Invalid DEC range %s. Must be between 0-360 deg or -90 - +90 deg." % str(dec))
+            raise ValueError("Invalid DEC range %s. Must be between 0-360 deg or -90 - +90 deg." % str(dec))
 
         return Position((ra, dec), system=System.CELESTIAL, epoch=epoch)
 
@@ -144,8 +143,7 @@ class Position (object):
         except ValueError as e:
             raise ValueError("Invalid AZ coordinate %s" % str(az))
         except PositionOutsideLimitsError:
-            raise ValueError(
-                "Invalid AZ range %s. Must be between 0-360 deg or -180 - +180 deg." % str(az))
+            raise ValueError("Invalid AZ range %s. Must be between 0-360 deg or -180 - +180 deg." % str(az))
 
         try:
             if not isinstance(alt, Coord):
@@ -158,25 +156,21 @@ class Position (object):
         except ValueError as e:
             raise ValueError("Invalid ALT coordinate %s" % str(alt))
         except PositionOutsideLimitsError:
-            raise ValueError(
-                "Invalid ALT range %s. Must be between 0-180 deg or -90 - +90 deg." % str(alt))
+            raise ValueError("Invalid ALT range %s. Must be between 0-180 deg or -90 - +90 deg." % str(alt))
 
         return Position((alt, az), system=System.TOPOCENTRIC)
 
     @staticmethod
     def fromLongLat(long, lat):
-        return Position(
-            Position._genericLongLat(int, lat), system=System.TOPOCENTRIC)
+        return Position(Position._genericLongLat(int, lat), system=System.TOPOCENTRIC)
 
     @staticmethod
     def fromGalactic(long, lat):
-        return Position(
-            Position._genericLongLat(int, lat), system=System.GALACTIC)
+        return Position(Position._genericLongLat(int, lat), system=System.GALACTIC)
 
     @staticmethod
     def fromEcliptic(long, lat):
-        return Position(
-            Position._genericLongLat(int, lat), system=System.ECLIPTIC)
+        return Position(Position._genericLongLat(int, lat), system=System.ECLIPTIC)
 
     @staticmethod
     def _genericLongLat(long, lat):
@@ -191,8 +185,7 @@ class Position (object):
         except ValueError as e:
             raise ValueError("Invalid LONGITUDE coordinate %s" % str(int))
         except PositionOutsideLimitsError:
-            raise ValueError(
-                "Invalid LONGITUDE range %s. Must be between 0-360 deg or -180 - +180 deg." % str(int))
+            raise ValueError("Invalid LONGITUDE range %s. Must be between 0-360 deg or -180 - +180 deg." % str(int))
 
         try:
             if not isinstance(lat, Coord):
@@ -205,8 +198,7 @@ class Position (object):
         except ValueError:
             raise ValueError("Invalid LATITUDE coordinate %s" % str(lat))
         except PositionOutsideLimitsError:
-            raise ValueError(
-                "Invalid LATITUDE range %s. Must be between 0-180 deg or -90 - +90 deg." % str(lat))
+            raise ValueError("Invalid LATITUDE range %s. Must be between 0-180 deg or -90 - +90 deg." % str(lat))
 
         return (int, lat)
 
@@ -217,13 +209,10 @@ class Position (object):
             value = abs(value)
 
         if not (lower <= value <= upper):
-            raise PositionOutsideLimitsError(
-                "Value must between %s and %s." % (lower, upper))
+            raise PositionOutsideLimitsError("Value must between %s and %s." % (lower, upper))
         return True
 
-    def __init__(self, coords,
-                 epoch=Epoch.J2000,
-                 system=System.CELESTIAL):
+    def __init__(self, coords, epoch=Epoch.J2000, system=System.CELESTIAL):
 
         self._coords = coords
         self.system = System.fromStr(str(system).upper())
@@ -233,10 +222,7 @@ class Position (object):
     # serialization
     #
     def __getstate__(self):
-        return {"_coords": self._coords,
-                "system": str(self.system),
-                "epoch": str(self.epoch)
-                }
+        return {"_coords": self._coords, "system": str(self.system), "epoch": str(self.epoch)}
 
     def __setstate__(self, state):
         self._coords = state["_coords"]
@@ -265,7 +251,7 @@ class Position (object):
 
     def __eq__(self, other):
         if isinstance(other, Position):
-            return (self._coords == other._coords)
+            return self._coords == other._coords
         return False
 
     def __neq__(self, other):
@@ -311,9 +297,9 @@ class Position (object):
         return ephem.Equatorial(self.ra.R, self.dec.R, epoch=epoch)
 
     def toEpoch(self, epoch=Epoch.J2000):
-        '''
+        """
         Returns a new Coordinate with the specified Epoch
-        '''
+        """
 
         # If coordinate epoch is already the right one, do nothing
         if str(epoch).lower() == str(self.epoch).lower():
@@ -360,7 +346,7 @@ class Position (object):
         @returns: Wether L{other} is within {eps} units from this point.
         @rtype: bool
         """
-        return (self.angsep(other) <= eps)
+        return self.angsep(other) <= eps
 
     # raDecToAltAz and altAzToRaDec adopted from sidereal.py
     # http://www.nmt.edu/tcc/help/lang/python/examples/sidereal/ims/
@@ -375,8 +361,8 @@ class Position (object):
         altR, azR = CoordUtil.coordRotate(decR, latR, haR)
 
         return Position.fromAltAz(
-            Coord.fromR(CoordUtil.makeValid180to180(altR)),
-            Coord.fromR(CoordUtil.makeValid0to360(azR)))
+            Coord.fromR(CoordUtil.makeValid180to180(altR)), Coord.fromR(CoordUtil.makeValid0to360(azR))
+        )
 
     @staticmethod
     def altAzToRaDec(altAz, latitude, lst):
@@ -388,5 +374,4 @@ class Position (object):
 
         ra = CoordUtil.haToRa(haR, lst)
 
-        return Position.fromRaDec(
-            CoordUtil.makeValid0to360(ra), CoordUtil.makeValid180to180(decR))
+        return Position.fromRaDec(CoordUtil.makeValid0to360(ra), CoordUtil.makeValid180to180(decR))
