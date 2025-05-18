@@ -15,8 +15,10 @@ from chimera.interfaces.telescope import (
 )
 
 from chimera.core.lock import lock
+from chimera.core.exceptions import ObjectNotFoundException, ObjectTooLowException
+
 from chimera.util.simbad import simbad_lookup
-from chimera.util.position import Position
+from chimera.util.position import Epoch, Position
 
 
 __all__ = ["TelescopeBase"]
@@ -33,9 +35,13 @@ class TelescopeBase(
         self.site = None
 
     @lock
-    def slew_to_object(self, name: str) -> None:
-        target = simbad_lookup(name)
-        return self.slew_to_ra_dec(target["ra"], target["dec"], 2000)
+    def slew_to_object(self, name):
+        _, ra, dec, epoch = simbad_lookup(name) or (None, None, None, None)
+        if ra is None or dec is None:
+            raise ObjectNotFoundException(f"Object {name} not found in SIMBAD")
+        self.slew_to_ra_dec(
+            Position.from_ra_dec(ra, dec)
+        )  # todo use epoch from simbad_lookup
 
     @lock
     def slew_to_ra_dec(self, ra: float, dec: float, epoch: float = 2000) -> None:
@@ -118,81 +124,68 @@ class TelescopeBase(
         else:
             self.move_south(abs(offset_dec), rate)
 
-    def get_ra(self) -> float:
+    def get_ra(self):
         raise NotImplementedError()
 
-    def get_dec(self) -> float:
+    def get_dec(self):
         raise NotImplementedError()
 
-    def get_az(self) -> float:
+    def get_az(self):
         raise NotImplementedError()
 
-    def get_alt(self) -> float:
+    def get_alt(self):
         raise NotImplementedError()
 
-    def get_position_ra_dec(self) -> Tuple[float, float]:
+    def get_position_ra_dec(self):
         raise NotImplementedError()
 
-    def get_position_alt_az(self) -> Tuple[float, float]:
+    def get_position_alt_az(self):
         raise NotImplementedError()
 
-    def get_target_ra_dec(self) -> Tuple[float, float]:
+    def get_target_ra_dec(self):
         raise NotImplementedError()
 
-    def get_target_alt_az(self) -> Tuple[float, float]:
-        raise NotImplementedError()
-
-    @lock
-    def sync_object(self, name: str) -> None:
-        # target = Simbad.lookup(name)
-        # self.sync_ra_dec(target)
-        pass
-
-    @lock
-    def sync_ra_dec(self, ra: float, dec: float, epoch: float = 2000) -> None:
+    def get_target_alt_az(self):
         raise NotImplementedError()
 
     @lock
-    def park(self) -> None:
+    def sync_object(self, name):
+        _, ra, dec, epoch = simbad_lookup(name) or (None, None, None, None)
+        if ra is None or dec is None:
+            raise ObjectNotFoundException(f"Object {name} not found in SIMBAD")
+        self.sync_ra_dec(
+            Position.from_ra_dec(ra, dec)
+        )  # todo use epoch from simbad_lookup
+
+    @lock
+    def sync_ra_dec(self, position):
         raise NotImplementedError()
 
     @lock
-    def unpark(self) -> None:
-        raise NotImplementedError()
-
-    def is_parked(self) -> bool:
+    def park(self):
         raise NotImplementedError()
 
     @lock
-    def set_park_position(self, alt: float, az: float) -> None:
-        self._park_position = alt, az
-
-    def get_park_position(self) -> Tuple[float, float]:
-        position = self._park_position or self["default_park_position"]
-        return position
-
-    def get_pier_side(self) -> TelescopePierSide:
+    def unpark(self):
         raise NotImplementedError()
 
-    def set_pier_side(self, side: TelescopePierSide) -> None:
+    def is_parked(self):
         raise NotImplementedError()
 
-    def open_cover(self) -> None:
+    @lock
+    def set_park_position(self, position):
+        self._park_position = position
+
+    def get_park_position(self):
+        return self._park_position or self["default_park_position"]
+
+    def start_tracking(self):
         raise NotImplementedError()
 
-    def close_cover(self) -> None:
+    def stop_tracking(self):
         raise NotImplementedError()
 
-    def is_cover_open(self) -> bool:
-        raise NotImplementedError()
-
-    def start_tracking(self) -> None:
-        raise NotImplementedError()
-
-    def stop_tracking(self) -> None:
-        raise NotImplementedError()
-
-    def is_tracking(self) -> bool:
+    def is_tracking(self):
         raise NotImplementedError()
 
     def get_metadata(self, request):
