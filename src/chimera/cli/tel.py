@@ -19,7 +19,6 @@ from chimera.interfaces.fan import (
     FanStatus,
 )
 from chimera.interfaces.telescope import (
-    SlewRate,
     TelescopeCover,
     TelescopePier,
     TelescopePierSide,
@@ -80,20 +79,10 @@ class ChimeraTel(ChimeraCLI):
         self.add_parameters(
             dict(
                 name="rate",
-                type=ParameterType.CHOICE,
-                choices=[
-                    "max",
-                    "MAX",
-                    "guide",
-                    "GUIDE",
-                    "center",
-                    "CENTER",
-                    "find",
-                    "FIND",
-                ],
-                default="CENTER",
+                type="float",
+                default=None,
                 help_group="RATE",
-                help="Slew rate to be used for --move-* commands. GUIDE, CENTER, FIND or MAX",
+                help="Slew rate to be used for --move-* commands in Arcseconds per second. If None, use the default rate.",
             )
         )
 

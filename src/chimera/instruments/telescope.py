@@ -2,21 +2,21 @@
 # SPDX-FileCopyrightText: 2006-present Paulo Henrique Silva <ph.silva@gmail.com>
 
 
+from typing import Tuple
 from chimera.core.chimeraobject import ChimeraObject
 
+from chimera.core.exceptions import ObjectTooLowException
 from chimera.interfaces.telescope import (
     TelescopeSlew,
     TelescopeSync,
     TelescopePark,
     TelescopeTracking,
-    SlewRate,
+    TelescopePierSide,
 )
 
 from chimera.core.lock import lock
-from chimera.core.exceptions import ObjectTooLowException
-
-from chimera.util.simbad import Simbad
-from chimera.util.position import Epoch, Position
+from chimera.util.simbad import simbad_lookup
+from chimera.util.position import Position
 
 
 __all__ = ["TelescopeBase"]
@@ -33,77 +33,76 @@ class TelescopeBase(
         self.site = None
 
     @lock
-    def slew_to_object(self, name):
-        target = Simbad.lookup(name)
-        self.slew_to_ra_dec(target)
+    def slew_to_object(self, name: str) -> None:
+        target = simbad_lookup(name)
+        return self.slew_to_ra_dec(target["ra"], target["dec"], 2000)
 
     @lock
-    def slew_to_ra_dec(self, position):
+    def slew_to_ra_dec(self, ra: float, dec: float, epoch: float = 2000) -> None:
         raise NotImplementedError()
 
-    def _validate_ra_dec(self, position):
+    def _validate_ra_dec(self, ra, dec):
+        # TODO: remove Position dependency
 
         if self.site is None:
             self.site = self.get_manager().get_proxy("/Site/0")
         lst = self.site.lst()
         latitude = self.site["latitude"]
 
-        alt_az = Position.ra_dec_to_alt_az(position, latitude, lst)
+        alt_az = Position.ra_dec_to_alt_az(Position.from_ra_dec(ra, dec), latitude, lst)
 
-        return self._validate_alt_az(alt_az)
+        return self._validate_alt_az(alt_az.alt, alt_az.az)
 
-    def _validate_alt_az(self, position):
+    def _validate_alt_az(self, alt, az):
 
-        if position.alt <= self["min_altitude"]:
+        if alt <= self["min_altitude"]:
             raise ObjectTooLowException(
-                f"Object too close to horizon (alt={position.alt} limit={self['min_altitude']})"
+                f"Object too close to horizon (alt={alt} limit={self['min_altitude']})"
             )
 
         return True
 
-    def _get_final_position(self, position):
+    # def _get_final_position(self, position):
 
-        if str(position.epoch).lower() != str(Epoch.NOW).lower():
-            self.log.info(
-                f"Precessing position ({str(position)}) from {position.epoch} to current epoch."
-            )
-            position_now = position.precess(Epoch.NOW)
-        else:
-            self.log.info(f"Current position ({str(position)}), no precession needed.")
-            position_now = position
+    #     if str(position.epoch).lower() != str(Epoch.NOW).lower():
+    #         self.log.info(f"Precessing position ({str(position)}) from {position.epoch} to current epoch.")
+    #         position_now = position.precess(Epoch.NOW)
+    #     else:
+    #         self.log.info(f"Current position ({str(position)}), no precession needed.")
+    #         position_now = position
 
-        self.log.info(f"Final precessed position {str(position_now)}")
+    #     self.log.info(f"Final precessed position {str(position_now)}")
 
-        return position_now
+    #     return position_now
 
     @lock
-    def slew_to_alt_az(self, position):
+    def slew_to_alt_az(self, alt: float, az: float) -> None:
         raise NotImplementedError()
 
-    def abort_slew(self):
+    def abort_slew(self) -> None:
         raise NotImplementedError()
 
-    def is_slewing(self):
+    def is_slewing(self) -> bool:
         raise NotImplementedError()
 
     @lock
-    def move_east(self, offset, rate=SlewRate.MAX):
+    def move_east(self, offset: float, rate=None) -> None:
         raise NotImplementedError()
 
     @lock
-    def move_west(self, offset, rate=SlewRate.MAX):
+    def move_west(self, offset: float, rate=None) -> None:
         raise NotImplementedError()
 
     @lock
-    def move_north(self, offset, rate=SlewRate.MAX):
+    def move_north(self, offset: float, rate=None) -> None:
         raise NotImplementedError()
 
     @lock
-    def move_south(self, offset, rate=SlewRate.MAX):
+    def move_south(self, offset: float, rate=None) -> None:
         raise NotImplementedError()
 
     @lock
-    def move_offset(self, offset_ra, offset_dec, rate=SlewRate.GUIDE):
+    def move_offset(self, offset_ra: float, offset_dec: float, rate=None) -> None:
 
         if offset_ra == 0:
             pass
@@ -119,64 +118,81 @@ class TelescopeBase(
         else:
             self.move_south(abs(offset_dec), rate)
 
-    def get_ra(self):
+    def get_ra(self) -> float:
         raise NotImplementedError()
 
-    def get_dec(self):
+    def get_dec(self) -> float:
         raise NotImplementedError()
 
-    def get_az(self):
+    def get_az(self) -> float:
         raise NotImplementedError()
 
-    def get_alt(self):
+    def get_alt(self) -> float:
         raise NotImplementedError()
 
-    def get_position_ra_dec(self):
+    def get_position_ra_dec(self) -> Tuple[float, float]:
         raise NotImplementedError()
 
-    def get_position_alt_az(self):
+    def get_position_alt_az(self) -> Tuple[float, float]:
         raise NotImplementedError()
 
-    def get_target_ra_dec(self):
+    def get_target_ra_dec(self) -> Tuple[float, float]:
         raise NotImplementedError()
 
-    def get_target_alt_az(self):
-        raise NotImplementedError()
-
-    @lock
-    def sync_object(self, name):
-        target = Simbad.lookup(name)
-        self.sync_ra_dec(target)
-
-    @lock
-    def sync_ra_dec(self, position):
+    def get_target_alt_az(self) -> Tuple[float, float]:
         raise NotImplementedError()
 
     @lock
-    def park(self):
+    def sync_object(self, name: str) -> None:
+        # target = Simbad.lookup(name)
+        # self.sync_ra_dec(target)
+        pass
+
+    @lock
+    def sync_ra_dec(self, ra: float, dec: float, epoch: float = 2000) -> None:
         raise NotImplementedError()
 
     @lock
-    def unpark(self):
-        raise NotImplementedError()
-
-    def is_parked(self):
+    def park(self) -> None:
         raise NotImplementedError()
 
     @lock
-    def set_park_position(self, position):
-        self._park_position = position
-
-    def get_park_position(self):
-        return self._park_position or self["default_park_position"]
-
-    def start_tracking(self):
+    def unpark(self) -> None:
         raise NotImplementedError()
 
-    def stop_tracking(self):
+    def is_parked(self) -> bool:
         raise NotImplementedError()
 
-    def is_tracking(self):
+    @lock
+    def set_park_position(self, alt: float, az: float) -> None:
+        self._park_position = alt, az
+
+    def get_park_position(self) -> Tuple[float, float]:
+        position = self._park_position or self["default_park_position"]
+        return position
+
+    def get_pier_side(self) -> TelescopePierSide:
+        raise NotImplementedError()
+
+    def set_pier_side(self, side: TelescopePierSide) -> None:
+        raise NotImplementedError()
+
+    def open_cover(self) -> None:
+        raise NotImplementedError()
+
+    def close_cover(self) -> None:
+        raise NotImplementedError()
+
+    def is_cover_open(self) -> bool:
+        raise NotImplementedError()
+
+    def start_tracking(self) -> None:
+        raise NotImplementedError()
+
+    def stop_tracking(self) -> None:
+        raise NotImplementedError()
+
+    def is_tracking(self) -> bool:
         raise NotImplementedError()
 
     def get_metadata(self, request):
