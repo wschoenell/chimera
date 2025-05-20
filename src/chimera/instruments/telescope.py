@@ -39,9 +39,7 @@ class TelescopeBase(
         _, ra, dec, epoch = simbad_lookup(name) or (None, None, None, None)
         if ra is None or dec is None:
             raise ObjectNotFoundException(f"Object {name} not found in SIMBAD")
-        self.slew_to_ra_dec(
-            Position.from_ra_dec(ra, dec)
-        )  # todo use epoch from simbad_lookup
+        self.slew_to_ra_dec(ra, dec)  # todo use epoch from simbad_lookup
 
     @lock
     def slew_to_ra_dec(self, ra: float, dec: float, epoch: float = 2000) -> None:
@@ -153,12 +151,10 @@ class TelescopeBase(
         _, ra, dec, epoch = simbad_lookup(name) or (None, None, None, None)
         if ra is None or dec is None:
             raise ObjectNotFoundException(f"Object {name} not found in SIMBAD")
-        self.sync_ra_dec(
-            Position.from_ra_dec(ra, dec)
-        )  # todo use epoch from simbad_lookup
+        self.sync_ra_dec(ra, dec, epoch=epoch)
 
     @lock
-    def sync_ra_dec(self, position):
+    def sync_ra_dec(self, ra: float, dec: float, epoch: float = 2000) -> None:
         raise NotImplementedError()
 
     @lock

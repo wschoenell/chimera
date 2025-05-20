@@ -19,6 +19,7 @@ from chimera.interfaces.fan import (
     FanStatus,
 )
 from chimera.interfaces.telescope import (
+    Telescope,
     TelescopeCover,
     TelescopePier,
     TelescopePierSide,
@@ -56,8 +57,8 @@ class ChimeraTel(ChimeraCLI):
             dict(name="dec", type="string", help_group="COORDS", help="Declination."),
             dict(
                 name="epoch",
-                type="string",
-                default="J2000",
+                type=float,
+                default=2000,
                 help_group="COORDS",
                 help="Epoch",
             ),
@@ -112,37 +113,35 @@ class ChimeraTel(ChimeraCLI):
     def init(self, options):
         pass
 
+    def _print_current_position(self, tag="current"):
+        ra, dec = self.telescope.get_position_ra_dec()
+        alt, az = self.telescope.get_position_alt_az()
+        self.out(
+            f"{tag} position ra/dec: {Coord.from_h(ra).to_hms()}/{Coord.from_d(dec).to_dms()}"
+        )
+        self.out(
+            f"{tag} position alt/az: {Coord.from_d(alt).to_dms()}/{Coord.from_h(az).to_hms()}"
+        )
+
     @action(
         help="Slew to given --ra --dec or --az --alt or --object", help_group="SLEW"
     )
     def slew(self, options):
-        telescope = self.telescope
+        telescope: Telescope = self.telescope
 
         if options.object_name is not None:
             target = options.object_name
         else:
             target = self._validate_coords(options)
 
-        def slew_begin(target):
+        def slew_begin(ra, dec):
             self.out(40 * "=")
             if options.object_name:
-                coords = tuple(target)
-                self.out(
-                    "slewing to %s (%s %s %s)... "
-                    % (
-                        options.object_name,
-                        coords[0],
-                        coords[1],
-                        target.epoch_string(),
-                    ),
-                    end="",
-                )
+                self.out(f"slewing to {options.object_name} ({ra} {dec})... ", end="")
             else:
-                self.out(
-                    "slewing to %s (%s)... " % (target, target.epoch_string()), end=""
-                )
+                self.out(f"slewing to {target} ({target.epoch_string()})... ", end="")
 
-        def slew_complete(position, status):
+        def slew_complete(ra, dec, status):
             if status == TelescopeStatus.OK:
                 self.out("OK.")
                 self.out(40 * "=")
@@ -153,8 +152,7 @@ class ChimeraTel(ChimeraCLI):
         telescope.slew_complete += slew_complete
 
         self.out(40 * "=")
-        self.out("current position ra/dec: %s" % telescope.get_position_ra_dec())
-        self.out("current position alt/az: %s" % telescope.get_position_alt_az())
+        self._print_current_position()
 
         try:
             if options.object_name:
@@ -165,15 +163,14 @@ class ChimeraTel(ChimeraCLI):
                     self.exit()
             else:
                 if self.local_slew:
-                    telescope.slew_to_alt_az(target)
+                    telescope.slew_to_alt_az(target.alt, target.az)
                 else:
-                    telescope.slew_to_ra_dec(target)
+                    telescope.slew_to_ra_dec(target.ra, target.dec, epoch=options.epoch)
         except ObjectTooLowException as e:
             self.err("ERROR: %s" % str(e))
             self.exit()
 
-        self.out("new position ra/dec: %s" % telescope.get_position_ra_dec())
-        self.out("new position alt/az: %s" % telescope.get_position_alt_az())
+        self._print_current_position("new")
 
         telescope.slew_begin -= slew_begin
         telescope.slew_complete -= slew_complete
@@ -188,8 +185,7 @@ class ChimeraTel(ChimeraCLI):
             target = self._validate_coords(options)
 
         self.out(40 * "=")
-        self.out("current position ra/dec: %s" % telescope.get_position_ra_dec())
-        self.out("current position alt/az: %s" % telescope.get_position_alt_az())
+        self._print_current_position()
         self.out(40 * "=")
 
         self.out("syncing on %s ... " % target, end="")
@@ -202,8 +198,7 @@ class ChimeraTel(ChimeraCLI):
         self.out("OK")
 
         self.out(40 * "=")
-        self.out("new position ra/dec: %s" % telescope.get_position_ra_dec())
-        self.out("new position alt/az: %s" % telescope.get_position_alt_az())
+        self._print_current_position("new")
         self.out(40 * "=")
 
     @action(help="Park the telescope", help_group="PARK", action_group="PARK")
@@ -375,9 +370,8 @@ class ChimeraTel(ChimeraCLI):
             "telescope: %s (%s)." % (telescope.get_location(), telescope["device"])
         )
 
-        position = telescope.get_position_ra_dec()
-        self.out("current position ra/dec (%s): %s" % (position.epoch, position))
-        self.out("current position alt/az: %s" % telescope.get_position_alt_az())
+        ra, dec = telescope.get_position_ra_dec()
+        self._print_current_position()
         self.out(
             "tracking: %s" % ("enabled" if telescope.is_tracking() else "disabled")
         )
@@ -427,21 +421,18 @@ class ChimeraTel(ChimeraCLI):
         telescope = self.telescope
 
         self.out(40 * "=")
-        self.out("current position ra/dec: %s" % telescope.get_position_ra_dec())
-        self.out("current position:alt/az: %s" % telescope.get_position_alt_az())
-
+        self._print_current_position()
         self.out(40 * "=")
         self.out(
-            "moving %s arcseconds (%s) %s at %s rate... "
+            "moving %s arcseconds (%s) %s at %s arcsec/sec rate... "
             % (offset.arcsec, offset.strfcoord(), direction, self.options.rate),
             end="",
         )
         try:
-            cmd(offset.arcsec, SlewRate(self.options.rate))
+            cmd(offset.arcsec, self.options.rate)
             self.out("OK")
             self.out(40 * "=")
-            self.out("new position ra/dec: %s" % telescope.get_position_ra_dec())
-            self.out("new position:alt/az: %s" % telescope.get_position_alt_az())
+            self._print_current_position("new")
 
         except Exception as e:
             self.err("ERROR. (%s)" % e)
