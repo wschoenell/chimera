@@ -46,20 +46,19 @@ class FakeTelescope(TelescopeBase, TelescopeCover, TelescopePier):
         alt_az = self._get_site().ra_dec_to_alt_az(
             Position.from_ra_dec(self._ra, self._dec)
         )
-        self._alt = alt_az.alt
-        self._az = alt_az.az
+        self._alt = float(alt_az.alt.to_d())
+        self._az = float(alt_az.az.to_d())
 
     def _get_site(self):
         # FIXME: create the proxy directly and cache it
         return self.get_manager().get_proxy("/Site/0")
 
     def _set_ra_dec_from_alt_az(self):
-        print("@@> set_ra_dec_from_alt_az", self._alt, self._az)
         ra_dec = self._get_site().alt_az_to_ra_dec(
             Position.from_alt_az(Coord.from_d(self._alt), Coord.from_h(self._az))
         )
-        self._ra = ra_dec.ra
-        self._dec = ra_dec.dec
+        self._ra = float(ra_dec.ra.to_h())
+        self._dec = float(ra_dec.dec.to_d())
 
     def __start__(self):
         self.set_hz(1)
@@ -174,7 +173,7 @@ class FakeTelescope(TelescopeBase, TelescopeCover, TelescopePier):
         pos = Position.from_ra_dec(ra + Coord.from_as(offset), dec, epoch=Epoch.NOW)
         self.slew_begin(pos.ra, pos.dec)
 
-        self._ra += Coord.from_as(offset)
+        self._ra += Coord.from_as(offset).to_h()
         self._set_alt_az_from_ra_dec()
 
         self._slewing = False
@@ -188,7 +187,7 @@ class FakeTelescope(TelescopeBase, TelescopeCover, TelescopePier):
         pos = Position.from_ra_dec(ra + Coord.from_as(-offset), dec)
         self.slew_begin(pos.ra, pos.dec)
 
-        self._ra += Coord.from_as(-offset)
+        self._ra += Coord.from_as(-offset).to_h()
         self._set_alt_az_from_ra_dec()
 
         self._slewing = False
@@ -263,8 +262,8 @@ class FakeTelescope(TelescopeBase, TelescopeCover, TelescopePier):
             raise NotImplementedError("Only J2000 epoch is supported")
         # Convert to Current Epoch before syncing
         position.to_epoch(Epoch.NOW)
-        self._ra = position.ra
-        self._dec = position.dec
+        self._ra = position.ra.to_h()
+        self._dec = position.dec.to_d()
 
     @lock
     def park(self):

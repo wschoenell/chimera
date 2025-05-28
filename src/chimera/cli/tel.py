@@ -29,7 +29,7 @@ from chimera.util.coord import Coord
 from chimera.util.output import green, red, yellow
 from chimera.util.position import Position
 
-from .cli import ChimeraCLI, ParameterType, action
+from .cli import ChimeraCLI, action
 
 
 class ChimeraTel(ChimeraCLI):
@@ -137,7 +137,10 @@ class ChimeraTel(ChimeraCLI):
         def slew_begin(ra, dec):
             self.out(40 * "=")
             if options.object_name:
-                self.out(f"slewing to {options.object_name} ({ra} {dec})... ", end="")
+                self.out(
+                    f"slewing to {options.object_name} ({Coord.from_h(ra).to_hms()} {Coord.from_d(dec).to_dms()})... ",
+                    end="",
+                )
             else:
                 self.out(f"slewing to {target} ({target.epoch_string()})... ", end="")
 
@@ -535,9 +538,10 @@ class ChimeraTel(ChimeraCLI):
 
         if (options.ra is not None) and (options.dec is not None):
             try:
-                target = Position.from_ra_dec(
-                    options.ra, options.dec, epoch=options.epoch
-                )
+                if options.epoch != 2000:
+                    self.out("ERROR: epoch %s is not supported." % options.epoch)
+                    self.exit()
+                target = Position.from_ra_dec(options.ra, options.dec)  # todo: epoch
             except Exception as e:
                 self.exit(str(e))
 

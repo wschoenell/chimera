@@ -17,6 +17,7 @@ from chimera.interfaces.telescope import (
 from chimera.core.lock import lock
 from chimera.core.exceptions import ObjectNotFoundException, ObjectTooLowException
 
+from chimera.util.coord import Coord
 from chimera.util.simbad import simbad_lookup
 from chimera.util.position import Epoch, Position
 
@@ -190,8 +191,8 @@ class TelescopeBase(
         if md is not None:
             return md
         # If not, just go on with the instrument's default metadata.
-        position = self.get_position_ra_dec()
-        alt = self.get_alt()
+        ra, dec = self.get_position_ra_dec()
+        alt, az = self.get_position_alt_az()
         return [
             ("TELESCOP", self["model"], "Telescope Model"),
             ("OPTICS", self["optics"], "Telescope Optics Type"),
@@ -203,22 +204,30 @@ class TelescopeBase(
             # TODO: How to get ra,dec at start of exposure (not end)
             (
                 "RA",
-                position.ra.to_dms().__str__(),
+                str(Coord.from_h(ra).to_hms()),
                 "Right ascension of the observed object",
             ),
             (
                 "DEC",
-                position.dec.to_dms().__str__(),
+                str(Coord.from_d(dec).to_dms()),
                 "Declination of the observed object",
             ),
-            ("EQUINOX", position.epoch_string()[1:], "coordinate epoch"),
-            ("ALT", alt.to_dms().__str__(), "Altitude of the observed object"),
-            ("AZ", self.get_az().to_dms().__str__(), "Azimuth of the observed object"),
+            ("EQUINOX", "NOW", "coordinate epoch"),
+            ("ALT", str(Coord.from_d(alt).to_dms()), "Altitude of the observed object"),
+            ("AZ", str(Coord.from_d(az).to_dms()), "Azimuth of the observed object"),
             ("AIRMASS", alt.radian, "Airmass of the observed object"),
             ("WCSAXES", 2, "wcs dimensionality"),
             ("RADESYS", "ICRS", "frame of reference"),
-            ("CRVAL1", position.ra.deg, "coordinate system value at reference pixel"),
-            ("CRVAL2", position.dec.deg, "coordinate system value at reference pixel"),
+            (
+                "CRVAL1",
+                Coord.from_h(ra).deg,
+                "coordinate system value at reference pixel",
+            ),
+            (
+                "CRVAL2",
+                Coord.from_d(dec).deg,
+                "coordinate system value at reference pixel",
+            ),
             ("CTYPE1", "RA---TAN", "name of the coordinate axis"),
             ("CTYPE2", "DEC--TAN", "name of the coordinate axis"),
             ("CUNIT1", "deg", "units of coordinate value"),
