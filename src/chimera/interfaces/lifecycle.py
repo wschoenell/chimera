@@ -4,7 +4,6 @@
 
 from chimera.core.interface import Interface
 
-
 __all__ = ["ILifeCycle"]
 
 
@@ -70,22 +69,13 @@ class ILifeCycle(Interface):
         @see: L{State} for possible values.
         """
 
-    def get_location(self):
+    def get_location(self) -> str:
         """
         Get the current L{Location} where the object is deployed.
         """
+        ...
 
-    def __setlocation__(self, location):
-        """
-        Internally used function to set the current location of the object.
-        """
-
-    def get_manager(self):
-        """
-        Get the current Manager for this object.
-        """
-
-    def get_proxy(self):
+    def get_proxy(self, url: str | None = None):
         """
         Get a Proxy for this object (useful for callbacks)
         """

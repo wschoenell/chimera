@@ -2,11 +2,10 @@
 # SPDX-FileCopyrightText: 2006-present Paulo Henrique Silva <ph.silva@gmail.com>
 
 
-from chimera.core.interface import Interface
 from chimera.core.event import event
-
-from chimera.util.enum import Enum
 from chimera.core.exceptions import ChimeraException
+from chimera.core.interface import Interface
+from chimera.util.enum import Enum
 
 
 class CantPointScopeException(ChimeraException):
@@ -27,7 +26,6 @@ class Target(Enum):
 
 
 class PointVerify(Interface):
-
     __config__ = {
         "camera": "/Camera/0",  # Camera attached to the telescope.
         "filterwheel": "/FilterWheel/0",  # Filterwheel, if exists.

@@ -1,9 +1,9 @@
 #!/bin/bash
 set -xe
-chimera-filter -vvvvv --version
-chimera-filter -vvvvv -h
-chimera-filter -vvvvv -F
-chimera-filter -vvvvv --info
-chimera-filter -vvvvv -f U
-chimera-filter -vvvvv -f B
-chimera-filter -vvvvv --get-filter
+chimera-filter -v --version
+chimera-filter -v -h
+chimera-filter -v -F
+chimera-filter -v --info
+chimera-filter -v -f U
+chimera-filter -v -f B
+chimera-filter -v --get-filter

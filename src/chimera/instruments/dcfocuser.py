@@ -1,18 +1,17 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # SPDX-FileCopyrightText: 2006-present Paulo Henrique Silva <ph.silva@gmail.com>
 
-from chimera.interfaces.focuser import (
-    InvalidFocusPositionException,
-    FocuserFeature,
-    FocuserAxis,
-)
+import os
 
-from chimera.instruments.focuser import FocuserBase
 from chimera.core.constants import SYSTEM_CONFIG_DIRECTORY
 from chimera.core.lock import lock
+from chimera.instruments.focuser import FocuserBase
+from chimera.interfaces.focuser import (
+    FocuserAxis,
+    FocuserFeature,
+    InvalidFocusPositionException,
+)
 from chimera.util.enum import Enum
-
-import os
 
 
 class Direction(Enum):
@@ -75,7 +74,6 @@ class DCFocuser(FocuserBase):
         self._last_time_log = None
 
     def __start__(self):
-
         # range setting
         self._range = (0, int(self["dt"] / float(self["pulse_dt"])))
         if self._range[1] <= 0:
@@ -90,7 +88,7 @@ class DCFocuser(FocuserBase):
         filename = os.path.join(SYSTEM_CONFIG_DIRECTORY, "dc_focuser.memory")
         if os.path.exists(filename):
             try:
-                last_position = int(open(filename, "r").read())
+                last_position = int(open(filename).read())
             except ValueError:
                 self.log.warning(
                     "Content of dc_focuser.memory file is invalid. Removing it."
@@ -151,7 +149,6 @@ class DCFocuser(FocuserBase):
         return True
 
     def _move(self, direction, steps):
-
         if not self._in_range(direction, steps):
             raise InvalidFocusPositionException(f"{steps} is outside focuser limits.")
 
@@ -163,7 +160,6 @@ class DCFocuser(FocuserBase):
         return True
 
     def _in_range(self, direction, n):
-
         # Assumes:
         #   0 -------  N
         #  IN         OUT

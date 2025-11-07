@@ -1,13 +1,11 @@
-from chimera.core.chimeraobject import ChimeraObject
-from chimera.core.event import event
-
-from chimera.controllers.scheduler.machine import Machine
-from chimera.controllers.scheduler.sequential import SequentialScheduler
 from chimera.controllers.scheduler.circular import CircularScheduler
 from chimera.controllers.scheduler.executor import ProgramExecutor
-from chimera.controllers.scheduler.states import State
+from chimera.controllers.scheduler.machine import Machine
 from chimera.controllers.scheduler.model import Session
-
+from chimera.controllers.scheduler.sequential import SequentialScheduler
+from chimera.controllers.scheduler.states import State
+from chimera.core.chimeraobject import ChimeraObject
+from chimera.core.event import event
 from chimera.util.enum import Enum
 
 
@@ -23,7 +21,6 @@ scheduling_algorithms = {
 
 
 class Scheduler(ChimeraObject):
-
     __config__ = {
         "telescope": "/Telescope/0",
         "rotator": "/Rotator/0",

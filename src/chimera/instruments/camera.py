@@ -1,32 +1,32 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # SPDX-FileCopyrightText: 2006-present Paulo Henrique Silva <ph.silva@gmail.com>
-from math import pi, cos, sin
-
+import os
 import threading
 import time
-import os
+from math import cos, pi, sin
 
+from chimera.controllers.imageserver.imagerequest import ImageRequest
+from chimera.controllers.imageserver.util import get_image_server
 from chimera.core.chimeraobject import ChimeraObject
+from chimera.core.lock import lock
 from chimera.interfaces.camera import (
     CameraExpose,
-    CameraTemperature,
     CameraInformation,
+    CameraTemperature,
     InvalidReadoutMode,
     Shutter,
 )
-from chimera.controllers.imageserver.imagerequest import ImageRequest
-from chimera.controllers.imageserver.util import get_image_server
-from chimera.core.lock import lock
 from chimera.util.image import Image, ImageUtil
 
 
 class CameraBase(ChimeraObject, CameraExpose, CameraTemperature, CameraInformation):
-
     def __init__(self):
         ChimeraObject.__init__(self)
 
         self.abort = threading.Event()
         self.abort.clear()
+
+        self.__is_exposing = threading.Event()
 
         self.extra_header_info = dict()
 
@@ -38,9 +38,15 @@ class CameraBase(ChimeraObject, CameraExpose, CameraTemperature, CameraInformati
 
     @lock
     def expose(self, request=None, **kwargs):
+        self.__is_exposing.set()
 
+        try:
+            return self._base_expose(request, **kwargs)
+        finally:
+            self.__is_exposing.clear()
+
+    def _base_expose(self, request, **kwargs):
         if request:
-
             if isinstance(request, ImageRequest):
                 image_request = request
             elif isinstance(request, dict):
@@ -67,7 +73,7 @@ class CameraBase(ChimeraObject, CameraExpose, CameraTemperature, CameraInformati
 
         # use image server if any and save image on server's default dir if
         # filename given as a relative path.
-        server = get_image_server(self.get_manager())
+        server = get_image_server(self)
         if not os.path.isabs(image_request["filename"]):
             image_request["filename"] = os.path.join(
                 server.default_night_dir(), image_request["filename"]
@@ -77,15 +83,13 @@ class CameraBase(ChimeraObject, CameraExpose, CameraTemperature, CameraInformati
         self.abort.clear()
 
         images = []
-        manager = self.get_manager()
 
         for frame_num in range(frames):
-
             # [ABORT POINT]
             if self.abort.is_set():
                 return tuple(images)
 
-            image_request.begin_exposure(manager)
+            image_request.begin_exposure(self)
             self._expose(image_request)
 
             # [ABORT POINT]
@@ -94,8 +98,8 @@ class CameraBase(ChimeraObject, CameraExpose, CameraTemperature, CameraInformati
 
             image = self._readout(image_request)
             if image is not None:
-                images.append(image)
-                image_request.end_exposure(manager)
+                images.append(image.url())
+                image_request.end_exposure(self)
 
             # [ABORT POINT]
             if self.abort.is_set():
@@ -107,7 +111,6 @@ class CameraBase(ChimeraObject, CameraExpose, CameraTemperature, CameraInformati
         return tuple(images)
 
     def abort_exposure(self, readout=True):
-
         if not self.is_exposing():
             return False
 
@@ -121,25 +124,27 @@ class CameraBase(ChimeraObject, CameraExpose, CameraTemperature, CameraInformati
         return True
 
     def _save_image(self, image_request, image_data, extras=None):
-
         if extras is not None:
             self.extra_header_info.update(extras)
 
         image_request.headers += self.get_metadata(image_request)
-        img = Image.create(image_data, image_request)
+        image = Image.create(image_data, image_request)
 
         # register image on ImageServer
-        server = get_image_server(self.get_manager())
-        proxy = server.register(img)
+
+        server = get_image_server(self)
+        if server:
+            image.http(server.register(image.filename))
 
         # and finally compress the image if asked
         if image_request["compress_format"].lower() != "no":
-            img.compress(format=image_request["compress_format"], multiprocess=True)
-        return proxy
+            image.compress(format=image_request["compress_format"], multiprocess=True)
+
+        return image
 
     def _get_readout_mode_info(self, binning, window):
         """
-        Check if the given binning and window could be used on the given CCD.
+        Check if the given binning and window could be used.
 
         Returns a tuple (mode_id, binning, top, left, width, height)
         """
@@ -148,11 +153,11 @@ class CameraBase(ChimeraObject, CameraExpose, CameraTemperature, CameraInformati
 
         try:
             bin_id = self.get_binnings()[binning]
-            mode = self.get_readout_modes()[self.get_current_ccd()][bin_id]
+            mode = self.get_readout_modes()[bin_id]
         except KeyError:
             # use full frame if None given
             bin_id = self.get_binnings()["1x1"]
-            mode = self.get_readout_modes()[self.get_current_ccd()][bin_id]
+            mode = self.get_readout_modes()[bin_id]
 
         left = 0
         top = 0
@@ -209,7 +214,7 @@ class CameraBase(ChimeraObject, CameraExpose, CameraTemperature, CameraInformati
         return mode, binning, top, left, width, height
 
     def is_exposing(self):
-        return NotImplementedError()
+        return self.__is_exposing.is_set()
 
     @lock
     def start_cooling(self, temp_c):
@@ -241,12 +246,6 @@ class CameraBase(ChimeraObject, CameraExpose, CameraTemperature, CameraInformati
     def is_fanning(self):
         raise NotImplementedError()
 
-    def get_ccds(self):
-        raise NotImplementedError()
-
-    def get_current_ccd(self):
-        raise NotImplementedError()
-
     def get_binnings(self):
         raise NotImplementedError()
 
@@ -259,14 +258,14 @@ class CameraBase(ChimeraObject, CameraExpose, CameraTemperature, CameraInformati
     def get_pixel_size(self):
         raise NotImplementedError()
 
-    def get_overscan_size(self, ccd=None):
+    def get_overscan_size(self):
         raise NotImplementedError()
 
     def get_readout_modes(self):
         raise NotImplementedError()
 
     def supports(self, feature=None):
-        return self.supported_features.get(feature, False)
+        raise NotImplementedError()
 
     def get_metadata(self, request):
         # Check first if there is metadata from an metadata override method.
@@ -338,16 +337,16 @@ class CameraBase(ChimeraObject, CameraExpose, CameraTemperature, CameraInformati
             scale_y = bin_factor * (((180 / pi) / focal_length) * (pix_h * 0.001))
 
             full_width, full_height = self.get_physical_size()
-            CRPIX1 = ((int(full_width / 2.0)) - left) - 1
-            CRPIX2 = ((int(full_height / 2.0)) - top) - 1
+            crpix1 = ((int(full_width / 2.0)) - left) - 1
+            crpix2 = ((int(full_height / 2.0)) - top) - 1
 
             # Adding WCS coordinates according to FITS standard.
             # Quick sheet: http://www.astro.iag.usp.br/~moser/notes/GAi_FITSimgs.html
             # http://adsabs.harvard.edu/abs/2002A%26A...395.1061G
             # http://adsabs.harvard.edu/abs/2002A%26A...395.1077C
             md += [
-                ("CRPIX1", CRPIX1, "coordinate system reference pixel"),
-                ("CRPIX2", CRPIX2, "coordinate system reference pixel"),
+                ("CRPIX1", crpix1, "coordinate system reference pixel"),
+                ("CRPIX2", crpix2, "coordinate system reference pixel"),
                 (
                     "CD1_1",
                     scale_x * cos(self["rotation"] * pi / 180.0),

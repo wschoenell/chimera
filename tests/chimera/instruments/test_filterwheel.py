@@ -1,28 +1,25 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # SPDX-FileCopyrightText: 2006-present Paulo Henrique Silva <ph.silva@gmail.com>
 
-from .base import FakeHardwareTest, RealHardwareTest
-
 import time
 
 from chimera.core.manager import Manager
+
+from .base import FakeHardwareTest, RealHardwareTest
 
 # hack for event triggering asserts
 fired_events = {}
 
 
-class FilterWheelTest(object):
-
+class FilterWheelTest:
     filter_wheel = ""
 
     def assert_events(self):
-
         assert "filter_change" in fired_events
         assert isinstance(fired_events["filter_change"][1], str)
         assert isinstance(fired_events["filter_change"][2], str)
 
     def setup_events(self):
-
         def filter_change_clbk(new_filter, old_filter):
             fired_events["filter_change"] = (time.time(), new_filter, old_filter)
 
@@ -30,7 +27,6 @@ class FilterWheelTest(object):
         fw.filter_change += filter_change_clbk
 
     def test_filters(self):
-
         f = self.manager.get_proxy(self.filter_wheel)
 
         filters = f.get_filters()
@@ -41,7 +37,6 @@ class FilterWheelTest(object):
             self.assert_events()
 
     def test_get_filters(self):
-
         f = self.manager.get_proxy(self.filter_wheel)
         filters = f.get_filters()
 
@@ -52,9 +47,7 @@ class FilterWheelTest(object):
 # setup real and fake tests
 #
 class TestFakeFilterWheel(FakeHardwareTest, FilterWheelTest):
-
     def setup(self):
-
         self.manager = Manager(port=8000)
 
         from chimera.instruments.fakefilterwheel import FakeFilterWheel
@@ -71,9 +64,7 @@ class TestFakeFilterWheel(FakeHardwareTest, FilterWheelTest):
 
 
 class TestRealFilterWheel(RealHardwareTest, FilterWheelTest):
-
     def setup(self):
-
         self.manager = Manager()
 
         from chimera.instruments.sbig import SBIG

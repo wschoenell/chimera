@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # SPDX-License-Identifier: GPL-2.0-or-later
 # SPDX-FileCopyrightText: 2006-present Paulo Henrique Silva <ph.silva@gmail.com>
-import copy
+
 import sys
 
 from chimera.core.exceptions import (
@@ -9,18 +9,12 @@ from chimera.core.exceptions import (
     ObjectTooLowException,
     print_exception,
 )
-
-from chimera.core.version import _chimera_version_
+from chimera.core.version import chimera_version
 from chimera.interfaces.fan import (
-    FanControllableDirection,
-    FanControllableSpeed,
-    FanState,
     FanStatus,
 )
 from chimera.interfaces.telescope import (
     Telescope,
-    TelescopeCover,
-    TelescopePier,
     TelescopePierSide,
     TelescopeStatus,
 )
@@ -34,7 +28,7 @@ from .cli import ChimeraCLI, action
 class ChimeraTel(ChimeraCLI):
     def __init__(self):
         ChimeraCLI.__init__(
-            self, "chimera-tel", "Telescope controller", _chimera_version_
+            self, "chimera-tel", "Telescope controller", chimera_version
         )
 
         self.local_slew = False
@@ -102,15 +96,11 @@ class ChimeraTel(ChimeraCLI):
         self.add_parameters(
             dict(
                 name="fan",
-                default="",
+                default="/Fan/0",
                 help_group="FANS",
-                help="Fan instrument to be used. Defaults to first fan in telescope['fans'] list.",
+                help="Fan instrument to be used.",
             )
         )
-
-    @action(help="Initialize the telescope (Lat/long/Date/Time)", help_group="INIT")
-    def init(self, options):
-        pass
 
     def _print_current_position(self, tag="current"):
         ra, dec = self.telescope.get_position_ra_dec()
@@ -119,7 +109,7 @@ class ChimeraTel(ChimeraCLI):
             f"{tag} position ra/dec: {Coord.from_h(ra).to_hms()}/{Coord.from_d(dec).to_dms()}"
         )
         self.out(
-            f"{tag} position alt/az: {Coord.from_d(alt).to_dms()}/{Coord.from_h(az).to_hms()}"
+            f"{tag} position alt/az: {Coord.from_d(alt).to_dms()}/{Coord.from_d(az).to_hms()}"
         )
 
     @action(
@@ -141,7 +131,7 @@ class ChimeraTel(ChimeraCLI):
                     end="",
                 )
             else:
-                self.out(f"slewing to {target} ({target.epoch_string()})... ", end="")
+                self.out(f"slewing to {target} ... ", end="")
 
         def slew_complete(ra, dec, status):
             if status == TelescopeStatus.OK:
@@ -160,14 +150,19 @@ class ChimeraTel(ChimeraCLI):
             if options.object_name:
                 try:
                     telescope.slew_to_object(target)
-                except ObjectNotFoundException:
-                    self.err(f"Object '{target}' not found on Simbad database.")
-                    self.exit()
+                except Exception as e:
+                    if "ObjectNotFoundException" in str(e):
+                        self.err(f"Object '{target}' not found on Simbad database.")
+                        self.exit()
+                    else:
+                        raise e
             else:
                 if self.local_slew:
-                    telescope.slew_to_alt_az(target.alt, target.az)
+                    alt, az = target
+                    telescope.slew_to_alt_az(alt, az)
                 else:
-                    telescope.slew_to_ra_dec(target.ra, target.dec, epoch=options.epoch)
+                    ra, dec = target
+                    telescope.slew_to_ra_dec(ra, dec, epoch=2000.0)
         except ObjectTooLowException as e:
             self.err("ERROR: %s" % str(e))
             self.exit()
@@ -190,12 +185,13 @@ class ChimeraTel(ChimeraCLI):
         self._print_current_position()
         self.out(40 * "=")
 
-        self.out("syncing on %s ... " % target, end="")
+        self.out(f"syncing on {target} ... ", end="")
 
         if options.object_name:
             telescope.sync_object(options.object_name)
         else:
-            telescope.sync_ra_dec(target)
+            ra, dec = target
+            telescope.sync_ra_dec(ra, dec, epoch=2000.0)
 
         self.out("OK")
 
@@ -229,7 +225,7 @@ class ChimeraTel(ChimeraCLI):
     def open(self, options):
         self.out(40 * "=")
 
-        if not self.telescope.features(TelescopeCover):
+        if not self.telescope.features("TelescopeCover"):
             self.out("Telescope does not supports this action")
         else:
             self.out("Opening telescope cover ... ", end="")
@@ -248,7 +244,7 @@ class ChimeraTel(ChimeraCLI):
     def close(self, options):
         self.out(40 * "=")
 
-        if not self.telescope.features(TelescopeCover):
+        if not self.telescope.features("TelescopeCover"):
             self.out("Telescope does not supports this action")
         else:
             self.out("Closing telescope cover ... ", end="")
@@ -294,9 +290,8 @@ class ChimeraTel(ChimeraCLI):
         action_group="FANS",
     )
     def set_fan_speed(self, options):
-        self._get_fan(options)
         try:
-            fan = self.telescope.get_manager().get_proxy(options.fan)
+            fan = self.telescope.get_proxy(options.fan)
         except ObjectNotFoundException:
             self.exit("%s: Could not find requested fan." % red("ERROR"))
 
@@ -310,12 +305,6 @@ class ChimeraTel(ChimeraCLI):
         self.out("%s" % (green("OK")))
         self.out("=" * 40)
 
-    def _get_fan(self, options):
-        if options.fan == "":
-            if self.telescope["fans"] is None or len(self.telescope["fans"]) == 0:
-                self.exit("%s: No fans configured on this telescope." % red("ERROR"))
-            options.fan = self.telescope["fans"][0]  # use the first fan
-
     @action(
         long="fan-on",
         help="Start telescope fan",
@@ -323,9 +312,8 @@ class ChimeraTel(ChimeraCLI):
         action_group="FANS",
     )
     def start_fan(self, options):
-        self._get_fan(options)
         try:
-            fan = self.telescope.get_manager().get_proxy(options.fan)
+            fan = self.telescope.get_proxy(options.fan)
         except ObjectNotFoundException:
             self.exit("%s: Could not find requested fan." % red("ERROR"))
 
@@ -351,9 +339,8 @@ class ChimeraTel(ChimeraCLI):
         action_group="FANS",
     )
     def stop_fan(self, options):
-        self._get_fan(options)
         try:
-            fan = self.telescope.get_manager().get_proxy(options.fan)
+            fan = self.telescope.get_proxy(options.fan)
         except ObjectNotFoundException:
             self.exit("%s: Could not find requested fan." % red("ERROR"))
 
@@ -362,7 +349,7 @@ class ChimeraTel(ChimeraCLI):
 
         self.out("=" * 40)
 
-        self.out("Stopping %s" % self.options.fan, end="")
+        self.out(f"Stopping {self.options.fan}", end="")
         try:
             if fan.switch_off():
                 self.out(green("OK"))
@@ -377,21 +364,19 @@ class ChimeraTel(ChimeraCLI):
         telescope = self.telescope
 
         self.out(40 * "=")
-        self.out(
-            "telescope: %s (%s)." % (telescope.get_location(), telescope["device"])
-        )
+        self.out(f"telescope: {telescope.get_location()}, device={telescope['device']}")
 
         ra, dec = telescope.get_position_ra_dec()
         self._print_current_position()
         self.out(
             "tracking: %s" % ("enabled" if telescope.is_tracking() else "disabled")
         )
-        if self.telescope.features(TelescopeCover):
+        if self.telescope.features("TelescopeCover"):
             self.out(
                 "telescope cover: %s "
                 % ("open" if telescope.is_cover_open() else "closed")
             )
-        if self.telescope.features(TelescopePier):
+        if self.telescope.features("TelescopePier"):
             self.out(
                 "current side of pier: %s "
                 % telescope.get_pier_side().__str__().lower()
@@ -399,8 +384,8 @@ class ChimeraTel(ChimeraCLI):
 
         if self.telescope["fans"] is not None:
             for fan in self.telescope["fans"]:
-                fan = self.telescope.get_manager().get_proxy(fan)
-                if fan.features(FanState):
+                fan = self.telescope.get_proxy(fan)
+                if fan.features("FanState"):
                     st = fan.status()
                     if st == FanStatus.ON:
                         stats = green("ON")
@@ -412,12 +397,12 @@ class ChimeraTel(ChimeraCLI):
                     stats = green("ON") if fan.is_switched_on() else red("OFF")
                 rotation = (
                     " speed %.2f" % fan.get_rotation()
-                    if fan.features(FanControllableSpeed)
+                    if fan.features("FanControllableSpeed")
                     else ""
                 )
                 direction = (
                     " direction %s" % fan.get_direction()
-                    if fan.features(FanControllableDirection)
+                    if fan.features("FanControllableDirection")
                     else ""
                 )
                 self.out(
@@ -428,8 +413,6 @@ class ChimeraTel(ChimeraCLI):
 
     def _move(self, direction, cmd, offset):
         offset = self._validate_offset(offset)
-
-        telescope = self.telescope
 
         self.out(40 * "=")
         self._print_current_position()
@@ -507,7 +490,7 @@ class ChimeraTel(ChimeraCLI):
     def set_pier_side_east(self, options):
         self.out(40 * "=")
 
-        if not self.telescope.features(TelescopePier):
+        if not self.telescope.features("TelescopePier"):
             self.out("Telescope does not supports this action")
         else:
             self.out("moving telescope to EAST pier side ... ", end="")
@@ -525,7 +508,7 @@ class ChimeraTel(ChimeraCLI):
     def set_pier_side_west(self, options):
         self.out(40 * "=")
 
-        if not self.telescope.features(TelescopePier):
+        if not self.telescope.features("TelescopePier"):
             self.out("Telescope does not supports this action")
         else:
             self.out("moving telescope to WEST pier side ... ", end="")
@@ -550,12 +533,14 @@ class ChimeraTel(ChimeraCLI):
                     self.out("ERROR: epoch %s is not supported." % options.epoch)
                     self.exit()
                 target = Position.from_ra_dec(options.ra, options.dec)  # todo: epoch
+                target = (float(target.ra.to_h()), float(target.dec.to_d()))
             except Exception as e:
                 self.exit(str(e))
 
         elif (options.az is not None) and (options.alt is not None):
             try:
                 target = Position.from_alt_az(options.alt, options.az)
+                target = (float(target.alt), float(target.az))
                 self.local_slew = True
             except Exception as e:
                 self.exit(str(e))
@@ -568,10 +553,8 @@ class ChimeraTel(ChimeraCLI):
     def __abort__(self):
         self.out("\naborting... ", end="")
 
-        # create a copy of telescope proxy
         if hasattr(self, "telescope"):
-            tel = copy.copy(self.telescope)
-            tel.abort_slew()
+            self.telescope.abort_slew()
 
     def _validate_offset(self, value):
         try:

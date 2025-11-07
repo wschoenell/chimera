@@ -2,9 +2,9 @@
 # SPDX-FileCopyrightText: 2006-present Paulo Henrique Silva <ph.silva@gmail.com>
 
 
-from chimera.core.interface import Interface
 from chimera.core.event import event
 from chimera.core.exceptions import ChimeraException
+from chimera.core.interface import Interface
 from chimera.util.enum import Enum
 
 
@@ -22,11 +22,6 @@ class Bitpix(Enum):
     int64 = "int64"
     float32 = "float32"
     float64 = "float64"
-
-
-class CCD(Enum):
-    IMAGING = "IMAGING"
-    TRACKING = "TRACKING"
 
 
 # Special features parameters can be passed as ImageRequest
@@ -52,7 +47,7 @@ class CameraStatus(Enum):
     ABORTED = "ABORTED"
 
 
-class ReadoutMode(object):
+class ReadoutMode:
     """
     Store basic geometry for a given readout mode. Implementer should
     provide an constuctor from a mode_string (some instrument specific
@@ -108,7 +103,6 @@ class Camera(Interface):
 
     __config__ = {
         "device": "Unknown",  # Bus address identifier for this camera. E.g. USB, LPT1, ...
-        "ccd": CCD.IMAGING,  # CCD to be used when multiple ccd camera. IMAGING or TRACKING.
         "camera_model": "Unknown",  # Camera model string. To be used by metadata purposes
         "ccd_model": "Unknown",  # CCD model string. To be used by metadata purposes
         "ccd_saturation_level": None,  # CCD level at which arises saturation (in ADUs).
@@ -140,8 +134,8 @@ class CameraExpose(Camera):
         @param request: ImageRequest containing details of the image to be taken
         @type  request: ImageRequest
 
-        @return: tuple of L{Image} proxies (empty if no one was taken)
-        @rtype: tuple(L{Proxy})
+        @return: Iterable of L{str} Image URLs (empty if no one was taken)
+        @rtype: Iterable(L{str})
         """
 
     def abort_exposure(self, readout=True):
@@ -209,12 +203,12 @@ class CameraExpose(Camera):
         """
 
     @event
-    def readout_complete(self, proxy, status):
+    def readout_complete(self, image_url, status):
         """
         Indicates that new readout is complete.
 
-        @param request: The just taken Image (as a Proxy) or None is status=[ERROR or ABORTED]..
-        @type  request: L{Proxy} or None
+        @param image: The just taken Image URL or None if status=[ERROR or ABORTED].
+        @type  image: L{str} or None
 
         @param status: The status of the current expose.
         @type  status: L{CameraStatus}
@@ -294,20 +288,13 @@ class CameraTemperature(Camera):
 
 
 class CameraInformation(Camera):
-
-    # for get_ccds, get_binnings and get_adcs, the instrument should return a
+    # for get_binnings and get_adcs, the instrument should return a
     # hash with keys as Human readable strings, which could be later passed as a
     # ImageRequest and be recognized by the intrument. Those strings can
     # be use as key to an internal hashmap.
     # example:
     # ADCs = {'12 bits': SomeInternalValueWhichMapsTo12BitsADC,
     #         '16 bits': SomeInternalValueWhichMapsTo16BitsADC}
-
-    def get_ccds(self):
-        pass
-
-    def get_current_ccd(self):
-        pass
 
     def get_binnings(self):
         pass
@@ -327,8 +314,7 @@ class CameraInformation(Camera):
     def get_readout_modes(self):
         """Get readout modes supported by this camera.
         The return value would have the following format:
-         {ccd1: {mode1: ReadoutMode(), mode2: ReadoutMode2()},
-          ccd2: {mode1: ReadoutMode(), mode2: ReadoutMode2()}}
+         {mode1: ReadoutMode(), mode2: ReadoutMode2(), ...}
         """
 
     #

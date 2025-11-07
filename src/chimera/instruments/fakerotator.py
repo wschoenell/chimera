@@ -1,10 +1,10 @@
 import time
+
 from chimera.instruments.rotator import RotatorBase
 from chimera.interfaces.rotator import RotatorStatus
 
 
 class FakeRotator(RotatorBase):
-
     def __init__(self):
         super().__init__()
         self._position = 0.0

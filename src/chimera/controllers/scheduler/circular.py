@@ -1,13 +1,12 @@
-from chimera.controllers.scheduler.sequential import SequentialScheduler
-from chimera.controllers.scheduler.model import Session, Program
-
 import logging
+
+from chimera.controllers.scheduler.model import Program, Session
+from chimera.controllers.scheduler.sequential import SequentialScheduler
 
 log = logging.getLogger(__name__)
 
 
 class CircularScheduler(SequentialScheduler):
-
     def __init__(self):
         SequentialScheduler.__init__(self)
 

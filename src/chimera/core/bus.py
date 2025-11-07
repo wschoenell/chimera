@@ -1,0 +1,552 @@
+import collections
+import logging
+import queue
+import selectors
+import threading
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
+from typing import Any, NamedTuple
+
+import msgspec
+
+from chimera.core.protocol import (
+    Event,
+    Messages,
+    Ping,
+    Pong,
+    Protocol,
+    Publish,
+    Request,
+    Response,
+    Subscribe,
+    Unsubscribe,
+)
+from chimera.core.transport import Transport
+from chimera.core.transport_factory import create_transport
+from chimera.core.url import URL, create_url, parse_url
+
+log = logging.getLogger(__name__)
+
+
+type PublisherId = str
+type SubscriberId = URL
+
+
+class CallbackId:
+    @classmethod
+    def new(cls, callable: Callable[..., None]) -> int:
+        return id(callable)
+
+
+class EventId(NamedTuple):
+    publisher: PublisherId
+    event: str
+
+
+@dataclass(frozen=True)
+class Subscriber:
+    subscriber: SubscriberId
+    callback: int
+
+
+class Callback(NamedTuple):
+    id: int
+    callable: Callable[..., None]
+
+
+class Bus:
+    def __init__(self, url: str):
+        self.url = create_url(url, cls="Bus")
+
+        self._pool = ThreadPoolExecutor()
+
+        self._running = threading.Event()
+        self._bus_started = threading.Event()
+
+        self._q: dict[str, queue.SimpleQueue[Messages | None]] = (
+            collections.defaultdict(queue.SimpleQueue)
+        )
+
+        # callbacks represent the subscriber-side of the pubsub model, where we can have references to the callbacks
+        self._callbacks: collections.defaultdict[
+            EventId, dict[Subscriber, Callback]
+        ] = collections.defaultdict(dict)
+
+        # subscribers represent the publisher-side of the pubsub model, where we don't have references to the callbacks
+        self._subscribers: collections.defaultdict[EventId, set[Subscriber]] = (
+            collections.defaultdict(set)
+        )
+        self._pubsub_lock = threading.Lock()
+
+        self._inbound: Transport = create_transport(self.url.bus)
+        self._inbound.bind()
+
+        self._outbound: dict[str, Transport] = {}
+        self._outbound_failures: collections.defaultdict[str, int] = (
+            collections.defaultdict(int)
+        )
+
+        self._outbound_lock = threading.Lock()
+
+        # Maximum consecutive failures before we consider a connection dead
+        self._max_send_failures = 3
+
+        self._encoder = msgspec.json.Encoder()
+        self._decoder = msgspec.json.Decoder(Messages)
+
+    def shutdown(self):
+        if not self.is_dead():
+            self._running.clear()
+
+            shutdown = create_transport(f"inproc://{self.url.path}")
+            shutdown.connect()
+            shutdown.send(b"shutdown request")
+
+            # signal all response queue handlers that we are shutting down
+            for key in self._q.keys():
+                # FIXME: why we need to send multiple Nones? only one fails to unblock some threads.
+                # send a few Nones to unblock any pending gets
+                for _ in range(5):
+                    self._q[key].put(None)
+
+            self._process_queue_future.result()
+            self._pool.shutdown()
+
+            self._inbound.close()
+            self._internal.close()
+
+            for socket in self._outbound.values():
+                socket.close()
+
+    def is_dead(self) -> bool:
+        return self._bus_started.is_set() and self._running.is_set() is False
+
+    def __del__(self):
+        self.shutdown()
+
+    def _cleanup_dead_subscribers(self, bus_url: str) -> None:
+        with self._pubsub_lock:
+            # Iterate through all events and remove subscribers from the dead bus
+            for event_id in list(self._subscribers.keys()):
+                dead_subscribers = {
+                    sub
+                    for sub in self._subscribers[event_id]
+                    if sub.subscriber.bus == bus_url
+                }
+                for sub in dead_subscribers:
+                    self._subscribers[event_id].discard(sub)
+                    # Also clean up from callbacks if this is our local bus
+                    if event_id in self._callbacks and sub in self._callbacks[event_id]:
+                        del self._callbacks[event_id][sub]
+
+                # Clean up empty event_ids
+                if not self._subscribers[event_id]:
+                    del self._subscribers[event_id]
+                if event_id in self._callbacks and not self._callbacks[event_id]:
+                    del self._callbacks[event_id]
+
+        log.debug(f"bus: cleaned up subscribers from dead bus: {bus_url}")
+
+    def _push(self, message: Messages) -> None:
+        if self.is_dead():
+            log.warning("push failed, bus is dead, not accepting new messages")
+            return
+
+        if message.dst_bus == self.url.bus:
+            # NOTE: we don't need to serialize/deserialize messages sent locally
+            #       but we must check if they are serializable, otherwise code won't
+            #       work when sending to remote buses.
+            try:
+                _ = self._encoder.encode(message)
+            except Exception:
+                log.exception(
+                    f"bus: serialization issue, won't work on remote buses: {message}"
+                )
+
+            # FIXME: this could block if you send too much without receiving.
+            if isinstance(message, Response) or isinstance(message, Pong):
+                self._q[message.dst].put(message)
+            else:
+                self._q[self.url.url].put(message)
+        else:
+            with self._outbound_lock:
+                if message.dst_bus not in self._outbound:
+                    # TODO: define some policy to handle closing of these sockets when not in use
+                    self._outbound[message.dst_bus] = create_transport(message.dst_bus)
+                    try:
+                        self._outbound[message.dst_bus].connect()
+                        self._outbound_failures[message.dst_bus] = 0
+                    except Exception:
+                        log.exception(
+                            f"bus: failed to connect to outbound bus: {message.dst_bus}"
+                        )
+                        return
+
+                try:
+                    message_bytes = self._encoder.encode(message)
+                except Exception:
+                    log.exception(f"bus: failed to encode message: {message}")
+                    return
+
+                # Non-blocking send - if it fails, log and continue
+                # This prevents blocking on dead or slow remote buses
+                if not self._outbound[message.dst_bus].send(message_bytes):
+                    self._outbound_failures[message.dst_bus] += 1
+
+                    if (
+                        self._outbound_failures[message.dst_bus]
+                        >= self._max_send_failures
+                    ):
+                        log.debug(
+                            f"bus: too many failures ({self._outbound_failures[message.dst_bus]}) "
+                            f"sending to {message.dst_bus}, closing connection"
+                        )
+                        # Close and remove the dead connection
+                        try:
+                            self._outbound[message.dst_bus].close()
+                        except Exception:
+                            pass
+                        del self._outbound[message.dst_bus]
+                        del self._outbound_failures[message.dst_bus]
+
+                        # Clean up dead subscribers from this bus
+                        self._cleanup_dead_subscribers(message.dst_bus)
+                    else:
+                        log.debug(
+                            f"bus: failed to send message to {message.dst_bus} "
+                            f"({self._outbound_failures[message.dst_bus]}/{self._max_send_failures}), "
+                            f"remote bus may be dead or send buffer full"
+                        )
+                else:
+                    # Send succeeded, reset failure counter
+                    self._outbound_failures[message.dst_bus] = 0
+
+    def _pop(
+        self, /, key: str | None = None, timeout: float | None = None
+    ) -> Messages | None:
+        key = key or self.url.url
+        return self._q[key].get(block=True, timeout=timeout)
+
+    def run_forever(self):
+        try:
+            self._run()
+            log.info("bye...")
+        except KeyboardInterrupt:
+            log.info("ctrl-c: exiting...")
+        except Exception:
+            log.exception("bus error")
+        finally:
+            self.shutdown()
+
+    def _run(self):
+        self._internal = create_transport(f"inproc://{self.url.path}")
+        self._internal.bind()
+
+        selector = selectors.DefaultSelector()
+        selector.register(self._inbound.recv_fd(), selectors.EVENT_READ)
+        selector.register(self._internal.recv_fd(), selectors.EVENT_READ)
+
+        self._running.set()
+
+        self._process_queue_future: Future[None] = self._pool.submit(
+            self._process_queue
+        )
+
+        self._bus_started.set()
+
+        while self._running.is_set():
+            events = selector.select(timeout=None)
+            if not events:
+                log.warning("bus: selector returned no events")
+                # Do spurious events happen? unprobably, but just in case...
+                continue
+
+            shutdown_requested = any(
+                [key.fd == self._internal.recv_fd() for key, _ in events]
+            )
+            # NOTE: if asked for shutdown, the caller is already closing sockets, so we cannot
+            #       handle anything more, so better exit here. If we implement a way to ack the
+            #       shutdown request, we might be able to process in-progress messages and then exit
+            if shutdown_requested:
+                log.debug("bus: shutdown requested")
+                return
+
+            new_messages = any([key.fd == self._inbound.recv_fd() for key, _ in events])
+            if new_messages:
+                recv_bytes = self._inbound.recv()
+
+                # FIXME: this could fail, check and push back errors if needed.
+                try:
+                    message: Messages = self._decoder.decode(recv_bytes)
+                except msgspec.DecodeError:
+                    log.exception(f"bus: failed to decode message: {recv_bytes}")
+                    continue
+
+                # FIXME: check for simple mistakes, like messages to the wrong receiver
+                self._push(message)
+
+    #
+    # bus client API
+    #
+    def ping(
+        self,
+        *,
+        src: str | URL,
+        dst: str | URL,
+        timeout: float = 5.0,
+    ) -> None | Pong:
+        ping = Protocol.ping(
+            src=parse_url(src).url,
+            dst=parse_url(dst).url,
+        )
+
+        self._push(ping)
+
+        try:
+            response = self._pop(ping.src, timeout=timeout)
+        except queue.Empty:
+            return ping.pong(ok=False)
+        if response is None or not isinstance(response, Pong):
+            return None
+
+        return response
+
+    # TODO: add timeout?
+    def request(
+        self,
+        *,
+        src: str | URL,
+        dst: str | URL,
+        method: str,
+        args: list[Any] | None = None,
+        kwargs: dict[str, Any] | None = None,
+    ) -> None | Response:
+        request = Protocol.request(
+            src=parse_url(src).url,
+            dst=parse_url(dst).url,
+            method=method,
+            args=args or [],
+            kwargs=kwargs or {},
+        )
+
+        self._push(request)
+
+        response = self._pop(request.src)
+        if response is None or not isinstance(response, Response):
+            raise RuntimeError("bus is dead")
+
+        return response
+
+    def subscribe(
+        self,
+        *,
+        sub: str | URL,
+        pub: str | URL,
+        event: str,
+        callback: Callable[..., None],
+    ):
+        pub_url = parse_url(pub)
+
+        callback_id = CallbackId.new(callback)
+        subscriber = Subscriber(parse_url(sub), callback_id)
+        event_id = EventId(pub_url.url, event)
+
+        self._push(
+            Protocol.subscribe(
+                sub=parse_url(sub).url,
+                pub=pub_url.url,
+                event=event,
+                callback=callback_id,
+            )
+        )
+
+        with self._pubsub_lock:
+            self._callbacks[event_id][subscriber] = Callback(callback_id, callback)
+
+    def unsubscribe(
+        self,
+        *,
+        sub: str | URL,
+        pub: str | URL,
+        event: str,
+        callback: Callable[..., None],
+    ):
+        pub_url = parse_url(pub)
+        callback_id = CallbackId.new(callback)
+        subscriber = Subscriber(parse_url(sub), callback_id)
+        event_id = EventId(pub_url.url, event)
+
+        self._push(
+            Protocol.unsubscribe(
+                sub=parse_url(sub).url,
+                pub=pub_url.url,
+                event=event,
+                callback=callback_id,
+            )
+        )
+
+        with self._pubsub_lock:
+            if subscriber in self._callbacks[event_id]:
+                del self._callbacks[event_id][subscriber]
+
+    def publish(
+        self,
+        *,
+        pub: str,
+        event: str,
+        args: list[Any] | None = None,
+        kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        # TODO: should we return something to confirm delivery?
+        self._push(
+            Protocol.publish(
+                pub=pub,
+                event=event,
+                args=args or [],
+                kwargs=kwargs or {},
+            )
+        )
+
+    #
+    # bus server-side handling
+    #
+    def _process_queue(self):
+        try:
+            while self._running.is_set():
+                message = self._pop()
+                if message is None:
+                    break
+
+                match message:
+                    case Ping():
+                        _ = self._pool.submit(self._handle_ping, message)
+                    case Request():
+                        _ = self._pool.submit(self._handle_request, message)
+                    case Subscribe():
+                        _ = self._pool.submit(self._handle_subscribe, message)
+                    case Unsubscribe():
+                        _ = self._pool.submit(self._handle_unsubscribe, message)
+                    case Publish():
+                        _ = self._pool.submit(self._handle_publish, message)
+                    case Event():
+                        _ = self._pool.submit(self._handle_event, message)
+                    case _:
+                        log.warning(f"Invalid message type: {type(message)}")
+
+                # TODO: handle invalid request
+                # self.transport.send(Protocol.error("Invalid request"))
+        except Exception:
+            log.exception("Error processing queue")
+        finally:
+            self.shutdown()
+
+    def resolve_request(
+        self, object: str, method: str
+    ) -> tuple[str | None, Callable[..., Any] | None]:
+        return None, None
+
+    def _handle_request(self, request: Request) -> None:
+        try:
+            dst = parse_url(request.dst)
+
+            # FIXME: this should return a full url/path so we can send it back to the caller saying exactly who handled the request
+            resource, method = self.resolve_request(dst.path, request.method)
+
+            if not resource:
+                self._push(request.not_found(f"'{dst.cls}' not found"))
+                return
+
+            if not method:
+                self._push(request.not_found(f"'{dst.cls}.{request.method}' not found"))
+                return
+
+            try:
+                result = method(*request.args, **request.kwargs)
+                self._push(request.ok(result))
+            except Exception as e:
+                self._push(request.error(e))
+        except Exception:
+            log.exception("error handling request")
+
+    def callbacks(self, /, event_id: EventId) -> dict[Subscriber, Callback]:
+        return self._callbacks[event_id]
+
+    def subscribers(self, /, event_id: EventId) -> set[Subscriber]:
+        return self._subscribers[event_id]
+
+    def _handle_ping(self, message: Ping) -> None:
+        try:
+            # resolve the dst URL and return the resolved URL in the pong
+            dst_url = parse_url(message.dst)
+            cls, method = self.resolve_request(dst_url.path, "get_location")
+            if cls is not None and method is not None:
+                resolved_url = method()
+                pong = message.pong(ok=True, resolved_url=resolved_url)
+                self._push(pong)
+            else:
+                self._push(message.pong(ok=False))
+        except Exception:
+            log.exception("error handling ping")
+
+    def _handle_subscribe(self, message: Subscribe):
+        try:
+            with self._pubsub_lock:
+                event_id = EventId(message.pub, message.event)
+                subscriber = Subscriber(parse_url(message.sub), message.callback)
+                self._subscribers[event_id].add(subscriber)
+        except Exception:
+            log.exception("error handling subscribe")
+
+    def _handle_unsubscribe(self, message: Unsubscribe):
+        try:
+            with self._pubsub_lock:
+                event_id = EventId(message.pub, message.event)
+                subscriber = Subscriber(parse_url(message.sub), message.callback)
+
+                if subscriber in self._subscribers[event_id]:
+                    self._subscribers[event_id].remove(subscriber)
+        except Exception:
+            log.exception("error handling unsubscribe")
+
+    def _handle_publish(self, message: Publish):
+        try:
+            event_id = EventId(message.pub, message.event)
+            subscribers = self._subscribers[event_id]
+
+            # no subscribers for this event
+            if not subscribers:
+                return
+
+            # unique set of buses where we have subscribers
+            urls = set([sub.subscriber.bus for sub in subscribers])
+
+            for url in urls:
+                event = message.callback(
+                    dst=url,
+                    event=message.event,
+                    args=message.args,
+                    kwargs=message.kwargs,
+                )
+                self._push(event)
+        except Exception:
+            log.exception("error handling publish")
+
+    def _handle_event(self, event: Event) -> None:
+        try:
+            event_id = EventId(event.src, event.event)
+
+            for callback in self._callbacks[event_id].values():
+                method = callback.callable
+                # NOTE: we cannot see exception happening inside the event handlers,
+                #       so we schedule a check on the future result in a separate task.
+                event_future = self._pool.submit(method, *event.args, **event.kwargs)
+                self._pool.submit(self._check_event_result, event, event_future)
+        except Exception:
+            log.exception("error handling event")
+
+    def _check_event_result(self, event: Event, future: Future[Any]) -> None:
+        try:
+            _ = future.result()
+        except Exception:
+            log.exception(f"error in event handler: {event.event}")

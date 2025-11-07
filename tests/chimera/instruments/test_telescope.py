@@ -2,24 +2,21 @@
 # SPDX-FileCopyrightText: 2006-present Paulo Henrique Silva <ph.silva@gmail.com>
 
 
-from concurrent.futures import ThreadPoolExecutor, wait
-import time
-import sys
 import logging
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, wait
 
 import pytest
 
+import chimera.core.log
 from chimera.core.manager import Manager
 from chimera.core.site import Site
-
+from chimera.interfaces.telescope import SlewRate, TelescopeStatus
 from chimera.util.coord import Coord
 from chimera.util.position import Position
 
-from chimera.interfaces.telescope import SlewRate, TelescopeStatus
-
 from .base import FakeHardwareTest, RealHardwareTest
-
-import chimera.core.log
 
 
 def assert_eps_equal(a, b, e=60):
@@ -36,12 +33,10 @@ log = logging.getLogger("chimera.tests")
 fired_events = {}
 
 
-class TelescopeTest(object):
-
+class TelescopeTest:
     telescope = ""
 
     def assert_events(self, slew_status):
-
         # for every exposure, we need to check if all events were fired in the right order
         # and with the right parameters
 
@@ -55,7 +50,6 @@ class TelescopeTest(object):
         assert fired_events["slew_complete"][2] == slew_status
 
     def setup_events(self):
-
         def slew_begin_callback(position):
             fired_events["slew_begin"] = (time.time(), position)
 
@@ -67,7 +61,6 @@ class TelescopeTest(object):
         tel.slew_complete += slew_complete_callback
 
     def test_slew(self):
-
         site = self.manager.get_proxy("/Site/0")
 
         dest = Position.from_ra_dec(site.LST(), site["latitude"])
@@ -90,7 +83,6 @@ class TelescopeTest(object):
         self.assert_events(TelescopeStatus.OK)
 
     def test_slew_abort(self):
-
         site = self.manager.get_proxy("/Site/0")
 
         # go to know position
@@ -136,7 +128,6 @@ class TelescopeTest(object):
         self.assert_events(TelescopeStatus.ABORTED)
 
     def test_sync(self):
-
         # get current position, drift the scope, and sync on the first
         # position (like done when aligning the telescope).
 
@@ -160,7 +151,6 @@ class TelescopeTest(object):
 
     @pytest.mark.skip
     def test_park(self):
-
         def print_position():
             print(self.tel.get_position_ra_dec(), self.tel.get_position_alt_az())
             sys.stdout.flush()
@@ -209,7 +199,6 @@ class TelescopeTest(object):
     pytest.mark.skip("FIXME: make a real test.")
 
     def test_jog(self):
-
         print()
 
         dt = Coord.from_dms("00:20:00")
@@ -287,9 +276,7 @@ class TelescopeTest(object):
 # setup real and fake tests
 #
 class TestFakeTelescope(FakeHardwareTest, TelescopeTest):
-
     def setup(self):
-
         self.manager = Manager(port=8000)
 
         self.manager.add_class(
@@ -317,9 +304,7 @@ class TestFakeTelescope(FakeHardwareTest, TelescopeTest):
 
 
 class TestRealTelescope(RealHardwareTest, TelescopeTest):
-
     def setup(self):
-
         self.manager = Manager(port=8000)
 
         self.manager.add_class(

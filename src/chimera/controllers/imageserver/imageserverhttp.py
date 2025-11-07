@@ -1,14 +1,10 @@
-import threading
-
 # import logging
 import os
-
-from http.server import SimpleHTTPRequestHandler
-from http.server import HTTPServer
+import threading
+from http.server import HTTPServer, SimpleHTTPRequestHandler
 
 
 class ImageServerHTTPHandler(SimpleHTTPRequestHandler):
-
     def do_GET(self):  # noqa: N802
         if self.path.startswith("/image/"):
             self.image()
@@ -27,9 +23,9 @@ class ImageServerHTTPHandler(SimpleHTTPRequestHandler):
         self.send_header("Last-Modified", self.date_time_string(modified))
         self.end_headers()
 
-    def response(self, code, txt, ctype):
+    def response(self, code: int, txt: str, ctype: str):
         self.send_head(code, ctype, len(txt))
-        self.wfile.write(txt)
+        self.wfile.write(txt.encode())
 
     def response_file(self, filename, ctype):
         f = open(filename, "rb")
@@ -42,26 +38,24 @@ class ImageServerHTTPHandler(SimpleHTTPRequestHandler):
             f.close()
 
     def image(self):
-
         args = self.path.split("/image/")
 
         if len(args) < 2:
             return self.response(200, "What are you looking for?")
         else:
-            img = self.server.ctrl.get_image_by(args[1])
-            if not img:
+            img = self.server.ctrl.get_image_by_id(args[1])
+            if img is None or not img.filename:
                 self.response(200, "Couldn't find the image.")
             else:
                 self.response_file(img.filename, "image/fits")
 
     def list(self):
-
         to_return = "<table><tr><th>Image ID</th><th>Path</th></tr>"
         keys = list(self.server.ctrl.images_by_path.keys())
         keys.sort()
         for key in keys:
             image = self.server.ctrl.images_by_path[key]
-            id = image.GUID()
+            id = image.id
             path = image.filename
             to_return += f'<tr><td><a href="/image/{id}">{id}</a></td><td><a href="/image/{id}">{path}</a></td></tr>'
 
@@ -69,7 +63,6 @@ class ImageServerHTTPHandler(SimpleHTTPRequestHandler):
 
 
 class ImageServerHTTP(threading.Thread):
-
     def __init__(self, ctrl):
         threading.Thread.__init__(self)
         self.daemon = True
@@ -78,7 +71,6 @@ class ImageServerHTTP(threading.Thread):
         self.die = threading.Event()
 
     def run(self):
-
         srv = HTTPServer(
             (self.ctrl["http_host"], self.ctrl["http_port"]), ImageServerHTTPHandler
         )

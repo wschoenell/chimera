@@ -1,12 +1,12 @@
+from chimera.core.lock import lock
 from chimera.instruments.fan import FanBase
 from chimera.interfaces.fan import (
-    FanControllableSpeed,
     FanControllableDirection,
+    FanControllableSpeed,
     FanDirection,
-    FanStatus,
     FanState,
+    FanStatus,
 )
-from chimera.core.lock import lock
 
 
 class FakeFan(FanBase, FanState, FanControllableSpeed, FanControllableDirection):
@@ -27,7 +27,7 @@ class FakeFan(FanBase, FanState, FanControllableSpeed, FanControllableDirection)
         if min_speed <= freq <= max_speed:
             self._current_speed = float(freq)
         else:
-            raise IOError(
+            raise OSError(
                 f"Fan speed must be between {min_speed:.2f} and {max_speed:.2f}. Got {freq:.2f}."
             )
 
@@ -50,7 +50,6 @@ class FakeFan(FanBase, FanState, FanControllableSpeed, FanControllableDirection)
 
     @lock
     def switch_on(self):
-
         self._current_status = FanStatus.ON
         self._is_on = True
 
@@ -60,7 +59,6 @@ class FakeFan(FanBase, FanState, FanControllableSpeed, FanControllableDirection)
 
     @lock
     def switch_off(self):
-
         self._current_status = FanStatus.OFF
         self._is_on = False
 

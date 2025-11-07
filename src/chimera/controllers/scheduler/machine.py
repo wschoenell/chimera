@@ -1,21 +1,17 @@
-from chimera.controllers.scheduler.states import State
-from chimera.controllers.scheduler.model import Session, Program
-from chimera.controllers.scheduler.status import SchedulerStatus
-
-from chimera.core.exceptions import ProgramExecutionException, ProgramExecutionAborted
-
-from chimera.core.site import Site
-
-import threading
 import logging
-
+import threading
 import time
+
+from chimera.controllers.scheduler.model import Program, Session
+from chimera.controllers.scheduler.states import State
+from chimera.controllers.scheduler.status import SchedulerStatus
+from chimera.core.exceptions import ProgramExecutionAborted, ProgramExecutionException
+from chimera.core.site import Site
 
 log = logging.getLogger(__name__)
 
 
 class Machine(threading.Thread):
-
     __state = None
     __state_lock = threading.Lock()
     __wake_up_call = threading.Condition()
@@ -53,7 +49,6 @@ class Machine(threading.Thread):
         self.executor.__start__()
 
         while self.state() != State.SHUTDOWN:
-
             if self.state() == State.OFF:
                 log.debug("[off] will just sleep..")
                 self.sleep()
@@ -64,7 +59,6 @@ class Machine(threading.Thread):
                 self.state(State.IDLE)
 
             if self.state() == State.IDLE:
-
                 log.debug("[idle] looking for something to do...")
 
                 # find something to do
@@ -122,9 +116,7 @@ class Machine(threading.Thread):
         session.commit()
 
     def _process(self, program):
-
         def process():
-
             # session to be used by executor and handlers
             session = Session()
 

@@ -3,26 +3,24 @@
 
 import random
 
-from chimera.core.manager import Manager
-from chimera.core.site import Site
-
-from chimera.interfaces.focuser import InvalidFocusPositionException
-from .base import FakeHardwareTest, RealHardwareTest
 import pytest
 
+from chimera.core.manager import Manager
+from chimera.core.site import Site
+from chimera.interfaces.focuser import InvalidFocusPositionException
 
-class FocuserTest(object):
+from .base import FakeHardwareTest, RealHardwareTest
 
+
+class FocuserTest:
     FOCUSER = ""
 
     def test_get_position(self):
-
         focus = self.manager.get_proxy(self.FOCUSER)
 
         assert focus.get_position() >= 0
 
     def test_move(self):
-
         focus = self.manager.get_proxy(self.FOCUSER)
 
         start = focus.get_position()
@@ -50,9 +48,7 @@ class FocuserTest(object):
 # setup real and fake tests
 #
 class TestFakeFocuser(FakeHardwareTest, FocuserTest):
-
     def setup(self):
-
         self.manager = Manager(port=8000)
         self.manager.add_class(
             Site,
@@ -75,7 +71,6 @@ class TestFakeFocuser(FakeHardwareTest, FocuserTest):
 
 
 class TestRealFocuser(RealHardwareTest, FocuserTest):
-
     def setup(self):
         self.manager = Manager(port=8000)
         self.manager.add_class(

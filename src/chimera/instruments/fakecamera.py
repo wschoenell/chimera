@@ -1,55 +1,39 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # SPDX-FileCopyrightText: 2006-present Paulo Henrique Silva <ph.silva@gmail.com>
 
-import threading
-import time
 import datetime as dt
-import random
-import urllib.request
-import urllib.parse
-import urllib.error
 import os
+import random
 import shutil
+import time
+import urllib.parse
+import urllib.request
 
 import numpy as np
 from astropy.io import fits
 
-from chimera.interfaces.camera import CCD, CameraFeature, ReadoutMode, CameraStatus
-
-from chimera.instruments.camera import CameraBase
-from chimera.instruments.filterwheel import (
-    FilterWheelBase,
-    InvalidFilterPositionException,
-)
-
 from chimera.core.lock import lock
+from chimera.instruments.camera import CameraBase
+from chimera.interfaces.camera import CameraFeature, CameraStatus, ReadoutMode
 from chimera.util.position import Epoch, Position
 
 
-class FakeCamera(CameraBase, FilterWheelBase):
-
+class FakeCamera(CameraBase):
     __config__ = {"use_dss": True, "ccd_width": 512, "ccd_height": 512}
 
     def __init__(self):
         CameraBase.__init__(self)
-        FilterWheelBase.__init__(self)
 
         self.__cooling = False
 
-        self.__last_filter = self._get_filter_name(0)
         self.__temperature = 20.0
         self.__setpoint = 0
         self.__last_frame_start = 0
         self.__is_fanning = False
 
-        self.__is_exposing = threading.Event()
-
         # my internal CCD code
-        self._my_ccd = 1 << 1
         self._my_adc = 1 << 2
         self._my_readout_mode = 1 << 3
-
-        self._ccds = {self._my_ccd: CCD.IMAGING}
 
         self._adcs = {"12 bits": self._my_adc}
 
@@ -57,7 +41,7 @@ class FakeCamera(CameraBase, FilterWheelBase):
 
         self._binning_factors = {"1x1": 1}
 
-        self.supported_features = {
+        self._supports = {
             CameraFeature.TEMPERATURE_CONTROL: True,
             CameraFeature.PROGRAMMABLE_GAIN: False,
             CameraFeature.PROGRAMMABLE_OVERSCAN: False,
@@ -74,7 +58,7 @@ class FakeCamera(CameraBase, FilterWheelBase):
         readout_mode.pixel_width = 9.0
         readout_mode.pixel_height = 9.0
 
-        self._readout_modes = {self._my_ccd: {self._my_readout_mode: readout_mode}}
+        self._readout_modes = {self._my_readout_mode: readout_mode}
 
     def __start__(self):
         self["camera_model"] = "Fake Cameras Inc."
@@ -90,13 +74,12 @@ class FakeCamera(CameraBase, FilterWheelBase):
         return True
 
     def _expose(self, image_request):
-        self.__is_exposing.set()
         self.expose_begin(image_request)
 
         status = CameraStatus.OK
 
         t = 0
-        self.__last_frame_start = dt.datetime.now(dt.timezone.utc)
+        self.__last_frame_start = dt.datetime.now(dt.UTC)
         while t < image_request["exptime"]:
             # [ABORT POINT]
             if self.abort.is_set():
@@ -106,11 +89,8 @@ class FakeCamera(CameraBase, FilterWheelBase):
             time.sleep(0.1)
             t += 0.1
 
+        time.sleep(0.1)  # simulate shutter close time
         self.expose_complete(image_request, status)
-        self.__is_exposing.clear()
-
-    def is_exposing(self):
-        return self.__is_exposing.is_set()
 
     def make_dark(self, shape, dtype, exptime):
         ret = np.zeros(shape, dtype=dtype)
@@ -157,16 +137,12 @@ class FakeCamera(CameraBase, FilterWheelBase):
         )
         self.readout_begin(image_request)
 
-        telescopes = self.get_manager().get_resources_by_class("Telescope")
-        if telescopes:
-            telescope = self.get_manager().get_proxy(telescopes[0])
-        else:
+        telescope = self.get_proxy("/Telescope/0")
+        if not telescope.ping():
             telescope = None
 
-        domes = self.get_manager().get_resources_by_class("Dome")
-        if domes:
-            dome = self.get_manager().get_proxy(domes[0])
-        else:
+        dome = self.get_proxy("/Dome/0")
+        if not dome.ping():
             dome = None
 
         if not telescope:
@@ -192,7 +168,7 @@ class FakeCamera(CameraBase, FilterWheelBase):
                 self.log.debug("Dome open? " + str(dome.is_slit_open()))
 
                 if dome.is_slit_open() and self["use_dss"]:
-                    dome_az = dome.get_az().to_d()
+                    dome_az = dome.get_az()
                     tel_az = telescope.get_az()
 
                     tel_position = Position.from_ra_dec(
@@ -274,7 +250,8 @@ class FakeCamera(CameraBase, FilterWheelBase):
         # Last resort if nothing else could make a picture
         if pix is None:
             pix = np.zeros((ccd_height, ccd_width), dtype=np.int32)
-        proxy = self._save_image(
+
+        image = self._save_image(
             image_request,
             pix,
             {
@@ -289,8 +266,9 @@ class FakeCamera(CameraBase, FilterWheelBase):
             self.readout_complete(None, CameraStatus.ABORTED)
             return None
 
-        self.readout_complete(proxy, CameraStatus.OK)
-        return proxy
+        time.sleep(0.1)  # simulate readout time
+        self.readout_complete(image.url(), CameraStatus.OK)
+        return image
 
     @lock
     def start_cooling(self, setpoint):
@@ -324,9 +302,6 @@ class FakeCamera(CameraBase, FilterWheelBase):
     def is_fanning(self):
         return self.__is_fanning
 
-    def get_current_ccd(self):
-        return self._my_ccd
-
     def get_binnings(self):
         return self._binnings
 
@@ -339,22 +314,11 @@ class FakeCamera(CameraBase, FilterWheelBase):
     def get_pixel_size(self):
         return (9, 9)
 
-    def get_overscan_size(self, ccd=None):
+    def get_overscan_size(self):
         return (0, 0)
 
     def get_readout_modes(self):
         return self._readout_modes
 
-    #
-    # filter wheel
-    #
-    def get_filter(self):
-        return self.__last_filter
-
-    @lock
-    def set_filter(self, filter):
-        if filter not in self.get_filters():
-            raise InvalidFilterPositionException(f"{filter} is not a valid filter")
-
-        self.filter_change(filter, self.__last_filter)
-        self.__last_filter = filter
+    def supports(self, feature=None):
+        return self._supports.get(feature, False)

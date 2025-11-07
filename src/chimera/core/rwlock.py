@@ -13,12 +13,11 @@ Released under the BSD-license.
 from threading import Condition, Lock, current_thread
 from time import time
 
-
 # Read write lock
 # ---------------
 
 
-class ReadWriteLock(object):
+class ReadWriteLock:
     """Read-Write lock class. A read-write lock differs from a standard
     threading.RLock() by allowing multiple threads to simultaneously hold a
     read lock, while allowing only a single thread to hold a write lock at the

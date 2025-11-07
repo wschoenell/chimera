@@ -1,8 +1,8 @@
 #!/bin/bash
 set -xe
-chimera-focus -vvvvv --version
-chimera-focus -vvvvv -h
-chimera-focus -vvvvv --to=1000
-chimera-focus -vvvvv -i
-chimera-focus -vvvvv --in=100
-chimera-focus -vvvvv --out=100
+chimera-focus -v --version
+chimera-focus -v -h
+chimera-focus -v --to=1000
+chimera-focus -v --info
+chimera-focus -v --in=100
+chimera-focus -v --out=100

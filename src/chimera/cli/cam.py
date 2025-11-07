@@ -7,11 +7,12 @@ import os
 import sys
 import time
 
-from chimera.core.exceptions import ObjectNotFoundException, print_exception
-from chimera.core.version import _chimera_version_
+from chimera.core.exceptions import print_exception
+from chimera.core.version import chimera_version
 from chimera.interfaces.camera import CameraFeature, CameraStatus
 from chimera.interfaces.filterwheel import InvalidFilterPositionException
 from chimera.util.ds9 import DS9
+from chimera.util.image import Image
 
 from .cli import ChimeraCLI, ParameterType, action
 
@@ -35,7 +36,7 @@ def get_compressed_name(filename, compression):
 
 class ChimeraCam(ChimeraCLI):
     def __init__(self):
-        ChimeraCLI.__init__(self, "chimera-cam", "Camera controller", _chimera_version_)
+        ChimeraCLI.__init__(self, "chimera-cam", "Camera controller", chimera_version)
 
         self.add_help_group("CAM", "Camera and Filter Wheel configuration")
         self.add_instrument(
@@ -50,6 +51,13 @@ class ChimeraCam(ChimeraCLI):
             name="wheel",
             cls="FilterWheel",
             help="Filter Wheel instrument to be used. If blank, try to guess from chimera.config",
+            help_group="CAM",
+        )
+
+        self.add_instrument(
+            name="dome",
+            cls="Dome",
+            help="Dome instrument to be used. If blank, try to guess from chimera.config",
             help_group="CAM",
         )
 
@@ -239,7 +247,7 @@ class ChimeraCam(ChimeraCLI):
         help="Print available filter names.",
     )
     def filters(self, options):
-        if not self.wheel:
+        if not hasattr(self, "wheel"):
             self.exit(
                 "No Filter Wheel found. Edit chimera.config or pass --wheel (see --help)"
             )
@@ -356,44 +364,33 @@ class ChimeraCam(ChimeraCLI):
         else:
             self.out("Cooling disabled.")
 
-        self.out(
-            "Current detector temperature:", "%.1f" % camera.get_temperature(), "oC"
-        )
-        if camera.supports(CameraFeature.PROGRAMMABLE_FAN):
-            if camera.is_fanning():
-                self.out("Cooler fan active.")
-            else:
-                self.out("Cooler fan inactive.")
+        self.out("Current CCD temperature:", "%.1f" % camera.get_temperature(), "oC")
+        if camera.is_fanning():
+            self.out("Cooler fan active.")
+        else:
+            self.out("Cooler fan inactive.")
 
         self.out("=" * 40)
         for feature in CameraFeature:
             self.out(str(feature), str(bool(camera.supports(feature))))
 
-        if camera.supports(CameraFeature.MULTIPLE_DETECTORS):
-            self.out("=" * 40)
-            ccds = camera.get_ccds()
-            current_ccd = camera.get_current_ccd()
-            self.out("Available CCDs: ", end="")
-            for ccd in list(ccds.keys()):
-                if ccd == current_ccd:
-                    self.out("*%s* " % str(ccds[ccd]), end="")
-                else:
-                    self.out("%s " % str(ccds[ccd]), end="")
-            self.out()
-
-        if camera.supports(CameraFeature.PROGRAMMABLE_ADC):
-            self.out("=" * 40)
-            self.out("ADCs: ", end="")
-            adcs = camera.get_adcs()
-            for adc in list(adcs.keys()):
-                self.out("%s " % adc, end="")
-            self.out()
+        self.out("=" * 40)
 
         self.out("=" * 40)
-        self.out("CCD size (pixel)       : %d x %d" % camera.get_physical_size())
-        self.out("Pixel size (micrometer): %.2f x %.2f" % camera.get_pixel_size())
-        if camera.supports(CameraFeature.PROGRAMMABLE_OVERSCAN):
-            self.out("Overscan size (pixel)  : %d x %d" % camera.get_overscan_size())
+        self.out("ADCs: ", end="")
+        adcs = camera.get_adcs()
+        for adc in list(adcs.keys()):
+            self.out("%s " % adc, end="")
+        self.out()
+
+        pix_w, pix_h = camera.get_pixel_size()
+        pix_w_um, pix_h_um = camera.get_physical_size()
+        overscan_w, overscan_h = camera.get_overscan_size()
+
+        self.out("=" * 40)
+        self.out(f"CCD size (pixel)       : {pix_w} x {pix_h}")
+        self.out(f"Pixel size (micrometer): {pix_w_um:.2f} x {pix_h_um:.2f}")
+        self.out(f"Overscan size (pixel)  : {overscan_w} x {overscan_h}")
 
         self.out("=" * 40)
         self.out("Available binnings: ", end="")
@@ -430,7 +427,7 @@ class ChimeraCam(ChimeraCLI):
             cam.abort_exposure()
 
     @action(
-        default=True,
+        # default=True,
         help_group="EXPOSE",
         help="Take an exposure with selected parameters",
     )
@@ -491,7 +488,10 @@ class ChimeraCam(ChimeraCLI):
 
             # validate filters
             for filter_name in filter_list:
-                if self.wheel and filter_name not in self.wheel.get_filters():
+                if (
+                    hasattr(self, "wheel")
+                    and filter_name not in self.wheel.get_filters()
+                ):
                     self.err("Invalid filter '%s'" % filter_name)
                     self.exit()
 
@@ -521,7 +521,7 @@ class ChimeraCam(ChimeraCLI):
         ) or options.force_display:
             try:
                 ds9 = DS9(open=True)
-            except IOError:
+            except OSError:
                 self.err("Problems starting DS9. DIsplay disabled.")
 
         def expose_begin(request):
@@ -547,8 +547,13 @@ class ChimeraCam(ChimeraCLI):
             current_frame_readout_start = time.time()
             self.out("reading out and saving ...", end="")
 
-        def readout_complete(image, status):
-            global current_frame, current_frame_expose_start, current_frame_readout_start
+        def readout_complete(image_url, status):
+            global \
+                current_frame, \
+                current_frame_expose_start, \
+                current_frame_readout_start
+
+            image = Image.from_url(image_url)
 
             if status == CameraStatus.OK:
                 self.out(
@@ -581,14 +586,7 @@ class ChimeraCam(ChimeraCLI):
         camera.readout_complete += readout_complete
 
         # do we have a Dome?
-        dome = None
-        remote_manager = camera.get_manager()
-        try:
-            dome = remote_manager.get_proxy(
-                remote_manager.get_resources_by_class("Dome")[0]
-            )
-        except ObjectNotFoundException:
-            pass
+        dome = self.dome if hasattr(self, "dome") else None
 
         if dome:
 
@@ -624,15 +622,19 @@ class ChimeraCam(ChimeraCLI):
             self.out("Full Frame")
 
         def change_filter(f):
-            if options.filter is not None and self.wheel:
+            if not hasattr(self, "wheel"):
+                self.exit(
+                    "No Filter Wheel found. Edit chimera.config or pass --wheel (see --help)"
+                )
+
+            if options.filter is not None and hasattr(self, "wheel"):
                 self.out(40 * "=")
                 try:
                     self.out("Changing to filter %s... " % f, end="")
                     self.wheel.set_filter(f)
                     self.out("OK")
                 except InvalidFilterPositionException as e:
-                    self.err("ERROR. Couldn't move filter wheel to %s. (%s)" % (f, e))
-                    self.exit()
+                    self.exit("ERROR. Couldn't move filter wheel to %s. (%s)" % (f, e))
 
         # finally, expose
         start = time.time()
@@ -679,7 +681,7 @@ class ChimeraCam(ChimeraCLI):
                         object_name=object_name,
                     )
 
-            except IOError as e:
+            except OSError as e:
                 self.err("Error trying to take exposures (%s)" % str(e))
             except Exception as e:
                 self.err("Error trying to take exposures. (%s)" % print_exception(e))
@@ -689,6 +691,16 @@ class ChimeraCam(ChimeraCLI):
             self.out(40 * "=")
             self.out("%s" % time.strftime("%c"))
             self.out(40 * "=")
+
+            # fixme: Should not be necessary. Bus should handle this.
+            camera.expose_begin -= expose_begin
+            camera.expose_complete -= expose_complete
+            camera.readout_begin -= readout_begin
+            camera.readout_complete -= readout_complete
+            if dome:
+                dome.sync_begin -= sync_begin
+                dome.sync_complete -= sync_complete
+            # fixme: end
 
 
 def main():

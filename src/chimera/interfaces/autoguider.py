@@ -2,11 +2,10 @@
 # SPDX-FileCopyrightText: 2006-present Paulo Henrique Silva <ph.silva@gmail.com>
 
 
-from chimera.core.interface import Interface
 from chimera.core.event import event
-
-from chimera.util.enum import Enum
 from chimera.core.exceptions import ChimeraException
+from chimera.core.interface import Interface
+from chimera.util.enum import Enum
 
 
 class GuiderStatus(Enum):
@@ -22,7 +21,6 @@ class StarNotFoundException(ChimeraException):
 
 
 class Autoguider(Interface):
-
     __config__ = {
         "site": "/Site/0",  # Telescope Site.
         "telescope": "/Telescope/0",  # Telescope instrument that will be guided by the autoguider.

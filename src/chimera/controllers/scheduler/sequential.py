@@ -1,23 +1,20 @@
-from chimera.controllers.scheduler.ischeduler import IScheduler
-from chimera.controllers.scheduler.model import Session, Program
+import logging
+from queue import Queue
 
 from sqlalchemy import desc
 
-from queue import Queue
-
-import logging
+from chimera.controllers.scheduler.ischeduler import IScheduler
+from chimera.controllers.scheduler.model import Program, Session
 
 log = logging.getLogger(__name__)
 
 
 class SequentialScheduler(IScheduler):
-
     def __init__(self):
         self.run_queue = None
         self.machine = None
 
     def reschedule(self, machine):
-
         self.machine = machine
         self.run_queue = Queue(-1)
 
@@ -48,7 +45,6 @@ class SequentialScheduler(IScheduler):
         return None
 
     def done(self, task, error=None):
-
         if error:
             log.debug(f"Error processing program {str(task)}.")
             log.exception(error)

@@ -4,51 +4,14 @@
 
 import datetime as dt
 
-from dateutil import tz
 import ephem
-import numpy as np
+from dateutil import tz
 
 from chimera.core.chimeraobject import ChimeraObject
 from chimera.util.coord import Coord, CoordUtil
 from chimera.util.position import Position
 
 __all__ = ["Site"]
-
-
-# More conversion functions.
-
-
-def datetime_from_jd(jd):
-    """Returns a date corresponding to the given Julian day number."""
-    if not isinstance(jd, float):
-        raise TypeError(f"{str(jd)} is not a float.")
-
-    n = int(np.floor(jd))
-    if jd > np.floor(jd) + 0.5:
-        n += 1
-
-    a = n + 32044
-    b = (4 * a + 3) // 146097
-    c = a - (146097 * b) // 4
-    d = (4 * c + 3) // 1461
-    e = c - (1461 * d) // 4
-    m = (5 * e + 2) // 153
-
-    jd += 0.5
-
-    hh = (jd - np.floor(jd)) * 24.0
-    mm = int(np.floor((hh - np.floor(hh)) * 60.0))
-    hh = int(np.floor(hh))
-
-    ret = dt.datetime(
-        year=100 * b + d - 4800 + m / 10,
-        month=m + 3 - 12 * (m // 10),
-        day=e + 1 - (153 * m + 2) // 5,
-        hour=hh,
-        minute=mm,
-    )
-
-    return ret
 
 
 class Site(ChimeraObject):
@@ -62,7 +25,7 @@ class Site(ChimeraObject):
     )
 
     def __init__(self):
-        ChimeraObject.__init__(self)
+        super().__init__()
 
         self._sun = ephem.Sun()
         self._moon = ephem.Moon()
@@ -82,7 +45,7 @@ class Site(ChimeraObject):
     def _date_to_local(self, date):
         # convert date to a non-naive datetime with TZ set to UTC
         time_tuple = date.tuple()
-        time_tuple = tuple((int(t) for t in time_tuple))
+        time_tuple = tuple(int(t) for t in time_tuple)
         time_tuple += (0, self.utc_tz)
         d_utc = dt.datetime(*time_tuple)
         # then return it in local timezone
@@ -120,6 +83,9 @@ class Site(ChimeraObject):
         if not date:
             date = self.ut()
         return float(self._get_ephem(date=date).sidereal_time())
+
+    def latitude_in_degs(self):
+        return float(self["latitude"].to_d())
 
     def lst(self, date=None):
         """
@@ -210,22 +176,37 @@ class Site(ChimeraObject):
         self._moon.compute(self._get_ephem(date))
         return self._moon.phase / 100.0
 
-    def ra_to_ha(self, ra):
-        return CoordUtil.ra_to_ha(ra, self.lst_in_rads())
+    def ra_to_ha(self, ra: float):
+        # ra in hours
+        # returns ha in hours
+        return float(
+            CoordUtil.ra_to_ha(
+                Coord.from_h(ra), Coord.from_r(self.lst_in_rads())
+            ).to_h()
+        )
 
-    def ha_to_ra(self, ha):
-        return CoordUtil.ra_to_ha(ha, self.lst_in_rads())
+    def ha_to_ra(self, ha: float):
+        return float(
+            CoordUtil.ha_to_ra(
+                Coord.from_h(ha), Coord.from_r(self.lst_in_rads())
+            ).to_h()
+        )
 
-    def ra_dec_to_alt_az(self, ra_dec, lst_in_rads=None):
+    def ra_dec_to_alt_az(self, ra: float, dec: float, lst_in_rads: float | None = None):
+        # ra in hours, dec in degrees, lst in radians
+        # returns alt, az in degrees
         if not lst_in_rads:
             lst_in_rads = self.lst_in_rads()
-        return Position.ra_dec_to_alt_az(ra_dec, self["latitude"], lst_in_rads)
+        return Position.ra_dec_to_alt_az(ra, dec, self["latitude"].to_d(), lst_in_rads)
 
-    def alt_az_to_ra_dec(self, alt_az, lst_in_rads=None):
+    def alt_az_to_ra_dec(
+        self, alt: float, az: float, lst_in_rads: float | None = None
+    ) -> tuple[float, float]:
+        # alt, az in degrees, lst in radians
+        # returns ra in hours, dec in degrees
         if not lst_in_rads:
             lst_in_rads = self.lst_in_rads()
-
-        return Position.alt_az_to_ra_dec(alt_az, self["latitude"], lst_in_rads)
+        return Position.alt_az_to_ra_dec(alt, az, self["latitude"].to_d(), lst_in_rads)
 
     def get_metadata(self, request):
         # Check first if there is metadata from an metadata override method.

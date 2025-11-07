@@ -2,25 +2,21 @@
 # SPDX-FileCopyrightText: 2006-present Paulo Henrique Silva <ph.silva@gmail.com>
 
 
-from typing import Tuple
-from chimera.core.chimeraobject import ChimeraObject
+from typing import cast
 
-from chimera.core.exceptions import ObjectTooLowException
+from chimera.core.chimeraobject import ChimeraObject
+from chimera.core.exceptions import ObjectNotFoundException, ObjectTooLowException
+from chimera.core.lock import lock
+from chimera.core.site import Site
 from chimera.interfaces.telescope import (
+    TelescopePark,
     TelescopeSlew,
     TelescopeSync,
-    TelescopePark,
     TelescopeTracking,
-    TelescopePierSide,
 )
-
-from chimera.core.lock import lock
-from chimera.core.exceptions import ObjectNotFoundException, ObjectTooLowException
-
 from chimera.util.coord import Coord
-from chimera.util.simbad import simbad_lookup
 from chimera.util.position import Position
-
+from chimera.util.simbad import simbad_lookup
 
 __all__ = ["TelescopeBase"]
 
@@ -28,38 +24,37 @@ __all__ = ["TelescopeBase"]
 class TelescopeBase(
     ChimeraObject, TelescopeSlew, TelescopeSync, TelescopePark, TelescopeTracking
 ):
-
     def __init__(self):
-        ChimeraObject.__init__(self)
+        super().__init__()
 
         self._park_position = None
-        self.site = None
+
+    # @property
+    # @functools.cache
+    def site(self) -> Site:
+        return cast(Site, self.get_proxy("/Site/0"))
 
     @lock
     def slew_to_object(self, name):
         _, ra, dec, epoch = simbad_lookup(name) or (None, None, None, None)
         if ra is None or dec is None:
             raise ObjectNotFoundException(f"Object {name} not found in SIMBAD")
-        self.slew_to_ra_dec(ra, dec)  # todo use epoch from simbad_lookup
+        self.slew_to_ra_dec(float(ra), float(dec))  # todo use epoch from simbad_lookup
 
     @lock
     def slew_to_ra_dec(self, ra: float, dec: float, epoch: float = 2000) -> None:
         raise NotImplementedError()
 
-    def _validate_ra_dec(self, ra, dec):
+    def _validate_ra_dec(self, ra: float, dec: float):
         # TODO: remove Position dependency
+        lst = self.site().lst_in_rads()  # in radians
+        latitude = self.site().latitude_in_degs()
 
-        if self.site is None:
-            self.site = self.get_manager().get_proxy("/Site/0")
-        lst = self.site.lst()
-        latitude = self.site["latitude"]
+        alt, az = Position.ra_dec_to_alt_az(ra, dec, latitude, lst)
 
-        alt_az = Position.ra_dec_to_alt_az(Position.from_ra_dec(ra, dec), latitude, lst)
-
-        return self._validate_alt_az(alt_az.alt, alt_az.az)
+        return self._validate_alt_az(alt, az)
 
     def _validate_alt_az(self, alt, az):
-
         if alt <= self["min_altitude"]:
             raise ObjectTooLowException(
                 f"Object too close to horizon (alt={alt} limit={self['min_altitude']})"
@@ -109,7 +104,6 @@ class TelescopeBase(
 
     @lock
     def move_offset(self, offset_ra: float, offset_dec: float, rate=None) -> None:
-
         if offset_ra == 0:
             pass
         elif offset_ra > 0:
@@ -216,7 +210,7 @@ class TelescopeBase(
             ("EQUINOX", "NOW", "coordinate epoch"),
             ("ALT", str(Coord.from_d(alt).to_dms()), "Altitude of the observed object"),
             ("AZ", str(Coord.from_d(az).to_dms()), "Azimuth of the observed object"),
-            ("AIRMASS", alt.radian, "Airmass of the observed object"),
+            ("AIRMASS", alt, "Airmass of the observed object"),
             ("WCSAXES", 2, "wcs dimensionality"),
             ("RADESYS", "ICRS", "frame of reference"),
             (

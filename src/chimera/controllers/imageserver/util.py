@@ -1,27 +1,17 @@
+from chimera.controllers.imageserver.imageserver import ImageServer
 from chimera.core.exceptions import (
     ChimeraException,
-    ObjectNotFoundException,
-    ClassLoaderException,
 )
-from chimera.core.path import ChimeraPath
 
 
-def get_image_server(manager):
-
+def get_image_server(chimera_object) -> ImageServer:
     try:
-        to_return = manager.get_proxy("/ImageServer/0")
-    except ObjectNotFoundException:
-        try:
-            to_return = manager.add_location(
-                "/ImageServer/imageserver", ChimeraPath().controllers
-            )
-        except Exception:
-            raise ClassLoaderException("Unable to create imageserver")
+        imgsrv = chimera_object.get_proxy("/ImageServer/0")
+        imgsrv.ping()
+    except Exception:
+        return None
 
-    if not to_return:
-        raise ClassLoaderException("Unable to create or find an ImageServer")
-
-    return to_return
+    return imgsrv
 
 
 class ImageServerException(ChimeraException):

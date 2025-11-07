@@ -1,13 +1,12 @@
 import logging
 
-from chimera.interfaces.camera import Shutter, Bitpix
-from chimera.core.exceptions import ChimeraValueError, ObjectNotFoundException
+from chimera.core.exceptions import ChimeraValueError
+from chimera.interfaces.camera import Bitpix, Shutter
 
 log = logging.getLogger(__name__)
 
 
 class ImageRequest(dict):
-
     valid_keys = [
         "exptime",
         "frames",
@@ -24,7 +23,6 @@ class ImageRequest(dict):
     ]
 
     def __init__(self, **kwargs):
-
         defaults = {
             "exptime": 1.0,
             "frames": 1,
@@ -101,7 +99,6 @@ class ImageRequest(dict):
             )
 
     def __setitem__(self, key, value):
-
         if key not in ImageRequest.valid_keys:
             raise KeyError(f"{key} is not a valid key for ImageRequest")
 
@@ -110,58 +107,52 @@ class ImageRequest(dict):
     def __str__(self):
         return f"exptime: {self['exptime']:.6f}, frames: {self['frames']}, shutter: {self['shutter']}, type: {self['type']}"
 
-    def begin_exposure(self, manager):
-
-        self._fetch_pre_headers(manager)
+    def begin_exposure(self, chimera_obj):
+        self._fetch_pre_headers(chimera_obj)
 
         if self["wait_dome"]:
-            try:
-                dome = manager.get_proxy(manager.get_resources_by_class("Dome")[0])
-                dome.sync_with_tel()
-                log.debug("Dome slit position synchronized with telescope position.")
-            except (ObjectNotFoundException, IndexError):
+            dome = chimera_obj.get_proxy("/Dome/0")
+            if not dome.ping():
                 log.info("No dome present, taking exposure without dome sync.")
+                return
+            dome.sync_with_tel()
+            if dome.is_sync_with_tel():
+                log.debug("Dome slit position synchronized with telescope position.")
+            else:
+                log.info(
+                    "Dome slit position could not be synchronized with telescope position."
+                )
 
-    def end_exposure(self, manager):
-        self._fetch_post_headers(manager)
+    def end_exposure(self, chimera_obj):
+        self._fetch_post_headers(chimera_obj)
 
-    def _fetch_pre_headers(self, manager):
+    def _fetch_pre_headers(self, chimera_obj):
         auto = []
         if self.auto_collect_metadata:
-            for cls in (
-                "Site",
-                "Camera",
-                "Dome",
-                "FilterWheel",
-                "Focuser",
-                "Telescope",
-                "WeatherStation",
-                "SeeingMonitor",
-            ):
-                locations = manager.get_resources_by_class(cls)
-                if len(locations) == 1:
-                    auto.append(str(locations[0]))
-                elif len(locations) == 0:
-                    log.warning(f"No {cls} available, header would be incomplete.")
-                else:
-                    log.warning(
-                        f"More than one {cls} available, header may be incorrect. Using the first {cls}."
-                    )
-                    auto.append(str(locations[0]))
+            auto += [
+                f"/{cls}/0"
+                for cls in (
+                    "Site",
+                    "Camera",
+                    "Dome",
+                    "FilterWheel",
+                    "Focuser",
+                    "Telescope",
+                    "WeatherStation",
+                    "SeeingMonitor",
+                )
+            ]
 
-            self._get_headers(manager, auto + self.metadata_pre)
+            self._get_headers(chimera_obj, auto + self.metadata_pre)
 
-    def _fetch_post_headers(self, manager):
-        self._get_headers(manager, self.metadata_post)
+    def _fetch_post_headers(self, chimera_obj):
+        self._get_headers(chimera_obj, self.metadata_post)
 
-    def _get_headers(self, manager, locations):
-
+    def _get_headers(self, chimera_obj, locations):
         for location in locations:
-
             if location not in self._proxies:
-                try:
-                    self._proxies[location] = manager.get_proxy(location)
-                except Exception:
-                    log.exception(f"Unable to get metadata from {location}")
-
-            self.headers += self._proxies[location].get_metadata(self)
+                self._proxies[location] = chimera_obj.get_proxy(location)
+            try:
+                self.headers += self._proxies[location].get_metadata(self)
+            except Exception:
+                log.warning(f"Unable to get metadata from {location}")

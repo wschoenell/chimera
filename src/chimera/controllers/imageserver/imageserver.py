@@ -1,15 +1,12 @@
-from chimera.core.chimeraobject import ChimeraObject
-from chimera.controllers.imageserver.imageserverhttp import ImageServerHTTP
-
-from chimera.util.image import Image
-
 import os
-
 from collections import OrderedDict
+
+from chimera.controllers.imageserver.imageserverhttp import ImageServerHTTP
+from chimera.core.chimeraobject import ChimeraObject
+from chimera.util.image import Image
 
 
 class ImageServer(ChimeraObject):
-
     __config__ = {  # root directory where images are stored
         "images_dir": "~/images",
         # path relative to images_dir where images for a
@@ -31,9 +28,8 @@ class ImageServer(ChimeraObject):
         self.images_by_path = OrderedDict()
 
     def __start__(self):
-
         if self["http_host"] == "default":
-            self["http_host"] = self.get_manager().get_hostname()
+            self["http_host"] = self.__bus__.url.host
 
         if self["httpd"]:
             self.http = ImageServerHTTP(self)
@@ -47,7 +43,6 @@ class ImageServer(ChimeraObject):
             self._load_image_dir(load_dir)
 
     def __stop__(self):
-
         if self["httpd"]:
             self.http.stop()
 
@@ -55,11 +50,9 @@ class ImageServer(ChimeraObject):
             self.unregister(image)
 
     def _load_image_dir(self, dir):
-
         files_to_load = []
 
         if os.path.exists(dir):
-
             # build files list
             for root, dirs, files in os.walk(dir):
                 files_to_load += [
@@ -70,7 +63,7 @@ class ImageServer(ChimeraObject):
                 self.log.debug(f"Loading {file}")
                 self.register(Image.from_file(file))
 
-    def register(self, image):
+    def register(self, image_filename):
         if len(self.images_by_id) > self["max_images"]:
             remove_items = list(self.images_by_id.keys())[: -self["max_images"]]
 
@@ -78,13 +71,14 @@ class ImageServer(ChimeraObject):
                 self.log.debug(f"Unregistering image {item}")
                 self.unregister(self.images_by_id[item])
 
+        image = Image.from_file(image_filename)
         self.images_by_id[image.id] = image
         self.images_by_path[image.filename] = image
 
         # save Image's HTTP address
         image.http(self.get_http_by_id(image.id))
 
-        return image
+        return image.http()
 
     def unregister(self, image):
         del self.images_by_id[image.id]

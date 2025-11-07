@@ -1,25 +1,22 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # SPDX-FileCopyrightText: 2006-present Paulo Henrique Silva <ph.silva@gmail.com>
 
-import time
 import threading
-
-from chimera.interfaces.telescope import (
-    TelescopeStatus,
-    TelescopeCover,
-    TelescopePier,
-    TelescopePierSide,
-)
-from chimera.instruments.telescope import TelescopeBase, ObjectTooLowException
+import time
+from typing import override
 
 from chimera.core.lock import lock
-
+from chimera.instruments.telescope import ObjectTooLowException, TelescopeBase
+from chimera.interfaces.telescope import (
+    TelescopePier,
+    TelescopePierSide,
+    TelescopeStatus,
+)
 from chimera.util.coord import Coord
-from chimera.util.position import Position, Epoch
+from chimera.util.position import Epoch, Position
 
 
-class FakeTelescope(TelescopeBase, TelescopeCover, TelescopePier):
-
+class FakeTelescope(TelescopeBase, TelescopePier):
     def __init__(self):
         TelescopeBase.__init__(self)
 
@@ -37,35 +34,26 @@ class FakeTelescope(TelescopeBase, TelescopeCover, TelescopePier):
         self._cover = False
         self._pier_side = TelescopePierSide.UNKNOWN
 
-        self._ra = 0
-        self._dec = 0
-        self._alt = 0
-        self._az = 0
+        self._ra: float = 0.0
+        self._dec: float = 0.0
+        self._alt: float = 0.0
+        self._az: float = 0.0
 
     def _set_alt_az_from_ra_dec(self):
-        alt_az = self._get_site().ra_dec_to_alt_az(
-            Position.from_ra_dec(self._ra, self._dec)
-        )
-        self._alt = float(alt_az.alt.to_d())
-        self._az = float(alt_az.az.to_d())
+        self._alt, self._az = self._get_site().ra_dec_to_alt_az(self._ra, self._dec)
 
     def _get_site(self):
         # FIXME: create the proxy directly and cache it
-        return self.get_manager().get_proxy("/Site/0")
+        return self.get_proxy("/Site/0")
 
     def _set_ra_dec_from_alt_az(self):
-        ra_dec = self._get_site().alt_az_to_ra_dec(
-            Position.from_alt_az(Coord.from_d(self._alt), Coord.from_h(self._az))
-        )
-        self._ra = float(ra_dec.ra.to_h())
-        self._dec = float(ra_dec.dec.to_d())
+        # alt, az in degrees
+        self._ra, self._dec = self._get_site().alt_az_to_ra_dec(self._alt, self._az)
 
     def __start__(self):
         self.set_hz(1)
 
-    @lock
     def control(self):
-        self._get_site()
         if not self._slewing:
             if self._tracking:
                 self._set_alt_az_from_ra_dec()
@@ -80,7 +68,6 @@ class FakeTelescope(TelescopeBase, TelescopeCover, TelescopePier):
         return True
 
     def slew_to_ra_dec(self, ra: float, dec: float, epoch=None):
-
         # TODO: remove checks after Position dependency is removed
         if epoch is None:
             epoch = 2000
@@ -104,7 +91,6 @@ class FakeTelescope(TelescopeBase, TelescopeCover, TelescopePier):
 
         t = 0
         while t < 5:
-
             if self._abort.is_set():
                 self._slewing = False
                 status = TelescopeStatus.ABORTED
@@ -125,11 +111,10 @@ class FakeTelescope(TelescopeBase, TelescopeCover, TelescopePier):
 
     @lock
     def slew_to_alt_az(self, alt: float, az: float):
-
         self._validate_alt_az(alt, az)
 
-        pos = self._get_site().alt_az_to_ra_dec(Position.from_alt_az(alt, az))
-        self.slew_begin(pos.alt, pos.az)  # todo: remove Position dependency
+        ra, dec = self._get_site().alt_az_to_ra_dec(alt, az)
+        self.slew_begin(ra, dec)
 
         alt_steps = (alt - self.get_alt()) / 10
         az_steps = (az - self.get_az()) / 10
@@ -140,7 +125,6 @@ class FakeTelescope(TelescopeBase, TelescopeCover, TelescopePier):
         status = TelescopeStatus.OK
         t = 0
         while t < 5:
-
             if self._abort.is_set():
                 self._slewing = False
                 status = TelescopeStatus.ABORTED
@@ -169,18 +153,17 @@ class FakeTelescope(TelescopeBase, TelescopeCover, TelescopePier):
 
     @lock
     def move_east(self, offset, rate=None):
-
         self._slewing = True
 
         ra, dec = self.get_position_ra_dec()
         pos = Position.from_ra_dec(ra + Coord.from_as(offset), dec, epoch=Epoch.NOW)
-        self.slew_begin(pos.ra, pos.dec)
+        self.slew_begin(float(pos.ra), float(pos.dec))
 
         self._ra += float(Coord.from_as(offset).to_h())
         self._set_alt_az_from_ra_dec()
 
         self._slewing = False
-        self.slew_complete(pos.ra, pos.dec, TelescopeStatus.OK)
+        self.slew_complete(self._ra, self._dec, TelescopeStatus.OK)
 
     @lock
     def move_west(self, offset, rate=None):
@@ -188,13 +171,13 @@ class FakeTelescope(TelescopeBase, TelescopeCover, TelescopePier):
 
         ra, dec = self.get_position_ra_dec()
         pos = Position.from_ra_dec(ra + Coord.from_as(-offset), dec)
-        self.slew_begin(pos.ra, pos.dec)
+        self.slew_begin(float(pos.ra), float(pos.dec))
 
         self._ra += float(Coord.from_as(-offset).to_h())
         self._set_alt_az_from_ra_dec()
 
         self._slewing = False
-        self.slew_complete(pos.ra, pos.dec, TelescopeStatus.OK)
+        self.slew_complete(self._ra, self._dec, TelescopeStatus.OK)
 
     @lock
     def move_north(self, offset, rate=None):
@@ -202,13 +185,13 @@ class FakeTelescope(TelescopeBase, TelescopeCover, TelescopePier):
 
         ra, dec = self.get_position_ra_dec()
         pos = Position.from_ra_dec(ra, dec + Coord.from_as(offset))
-        self.slew_begin(pos.ra, pos.dec)
+        self.slew_begin(float(pos.ra), float(pos.dec))
 
-        self._dec += float(Coord.from_as(offset))
+        self._dec += float(Coord.from_as(offset).to_d())
         self._set_alt_az_from_ra_dec()
 
         self._slewing = False
-        self.slew_complete(pos.ra, pos.dec, TelescopeStatus.OK)
+        self.slew_complete(self._ra, self._dec, TelescopeStatus.OK)
 
     @lock
     def move_south(self, offset, rate=None):
@@ -216,20 +199,22 @@ class FakeTelescope(TelescopeBase, TelescopeCover, TelescopePier):
 
         ra, dec = self.get_position_ra_dec()
         pos = Position.from_ra_dec(ra, dec + Coord.from_as(-offset))
-        self.slew_begin(pos.ra, pos.dec)
+        self.slew_begin(float(pos.ra), float(pos.dec))
 
-        self._dec += float(Coord.from_as(-offset))
+        self._dec += float(Coord.from_as(-offset).to_d())
         self._set_alt_az_from_ra_dec()
 
         self._slewing = False
-        self.slew_complete(pos.ra, pos.dec, TelescopeStatus.OK)
+        self.slew_complete(self._ra, self._dec, TelescopeStatus.OK)
 
     @lock
-    def get_ra(self):
+    @override
+    def get_ra(self) -> float:
         return self._ra
 
     @lock
-    def get_dec(self):
+    @override
+    def get_dec(self) -> float:
         return self._dec
 
     @lock
@@ -246,7 +231,8 @@ class FakeTelescope(TelescopeBase, TelescopeCover, TelescopePier):
 
     @lock
     def get_position_alt_az(self):
-        return self.get_alt(), self.get_az()
+        pos = Position.from_alt_az(self.get_alt(), self.get_az())
+        return float(pos.alt), float(pos.az)
 
     @lock
     def get_target_ra_dec(self):
@@ -264,8 +250,8 @@ class FakeTelescope(TelescopeBase, TelescopeCover, TelescopePier):
             raise NotImplementedError("Only J2000 epoch is supported")
         # Convert to Current Epoch before syncing
         position.to_epoch(Epoch.NOW)
-        self._ra = position.ra.to_h()
-        self._dec = position.dec.to_d()
+        self._ra = float(position.ra.to_h())
+        self._dec = float(position.dec.to_d())
 
     @lock
     def park(self):

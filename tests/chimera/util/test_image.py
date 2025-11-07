@@ -1,15 +1,14 @@
-from chimera.util.image import Image, ImageUtil
-
-import numpy as N
 import os
 
+import numpy as np
 
-class TestImage(object):
+from chimera.util.image import Image, ImageUtil
 
+
+class TestImage:
     base = os.path.dirname(__file__)
 
     def test_headers(self):
-
         img = Image.from_file(os.path.join(self.base, "teste-sem-wcs.fits"), fix=False)
 
         print()
@@ -18,7 +17,6 @@ class TestImage(object):
             print(k, v, type(v))
 
     def test_wcs(self):
-
         img = Image.from_file(os.path.join(self.base, "teste-com-wcs.fits"), fix=False)
         world = img.world_at(0, 0)
         print("world value at pixel 0,0:", world)
@@ -31,9 +29,7 @@ class TestImage(object):
         assert world.dec.deg is not None
 
     def test_extractor(self):
-
         for f in ["teste-com-wcs.fits", "teste-sem-wcs.fits"]:
-
             img = Image.from_file(os.path.join(self.base, f), fix=False)
 
             stars = img.extract()
@@ -52,7 +48,6 @@ class TestImage(object):
                 )
 
     def test_make_filename(self):
-
         names = []
 
         for i in range(10):
@@ -68,8 +63,7 @@ class TestImage(object):
             os.unlink(name)
 
     def test_create(self):
-
-        img = Image.create(N.zeros((100, 100)), filename="autogen-teste.fits")
+        img = Image.create(np.zeros((100, 100)), filename="autogen-teste.fits")
         assert os.path.exists(img.filename)
         assert img.width() == 100
         assert img.height() == 100

@@ -3,12 +3,11 @@
 
 
 from chimera.core.chimeraobject import ChimeraObject
-from chimera.interfaces.filterwheel import FilterWheel, InvalidFilterPositionException
 from chimera.core.lock import lock
+from chimera.interfaces.filterwheel import FilterWheel, InvalidFilterPositionException
 
 
 class FilterWheelBase(ChimeraObject, FilterWheel):
-
     def __init__(self):
         ChimeraObject.__init__(self)
 

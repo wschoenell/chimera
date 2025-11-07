@@ -28,8 +28,7 @@ class State(Enum):
     AS = "AS"
 
 
-class CoordUtil(object):
-
+class CoordUtil:
     COORD_RE = re.compile(
         r"((?P<dd>(?P<sign>[+-]?)[\s]*\d+)[dh]?[\s:]*)?((?P<mm>\d+)[m]?[\s:]*)?((?P<ss>\d+)(?P<msec>\.\d*)?([\ss]*))?"
     )
@@ -93,13 +92,11 @@ class CoordUtil(object):
 
     @staticmethod
     def dms_to_d(dms):
-
         # float/int case
         if isinstance(dms, (int, float)):
             return float(dms)
 
         if isinstance(dms, str):
-
             # try to match the regular expression
             matches = CoordUtil.COORD_RE.match(dms.strip())
 
@@ -375,7 +372,7 @@ class CoordUtil(object):
         return ans
 
 
-class Coord(object):
+class Coord:
     """
     L{Coord} represents a single angular coordinate.
 
@@ -564,11 +561,10 @@ class Coord(object):
         if hasattr(ctr, "__call__"):
             return ctr(c)
         else:
-            raise ValueError("Trying to create Coord " f"from unknown state {state}")
+            raise ValueError(f"Trying to create Coord from unknown state {state}")
 
     @staticmethod
     def _from_float_to(c, state):
-
         if isinstance(c, str):
             try:
                 c = float(c)
@@ -610,7 +606,6 @@ class Coord(object):
     arcsec = property(lambda self: self.get(State.AS))
 
     def get(self, state=None):
-
         state = state or self.state
 
         if state in self.cache:
@@ -659,8 +654,7 @@ class Coord(object):
 
     def __iter__(self):
         if self.state in [State.DMS, State.HMS]:
-            for v in self.get():
-                yield v
+            yield from self.get()
         else:
             yield self.get()
 
