@@ -55,6 +55,9 @@ programs:
                 image_type: OBJECT
                 object_name: obj1 acq
 
+            -   action: autoguide       # Stop autoguiding after the science exposures
+                enable: False
+
     # new target with no autofocus or pointverify
     -   program:
         name: PRG02
