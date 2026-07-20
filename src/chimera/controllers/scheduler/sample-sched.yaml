@@ -28,6 +28,11 @@ programs:
             -   action: pointverify
                 here: True
 
+            -   action: autoguide       # Enable autoguiding before the science exposures
+                enable: True
+                recalibrate: False
+                wait: True              # Block until guiding has settled
+
             -   action: expose
                 filter: V
                 frames: 1
