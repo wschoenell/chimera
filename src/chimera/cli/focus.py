@@ -258,10 +258,8 @@ class ChimeraFocus(ChimeraCLI):
                 pass
 
         def step_complete(position, star, filename):
-            # the metric fed to the fit is a robust ensemble over many stars, so
-            # report that (HFD or FWHM, with its scatter and star count) rather
-            # than one star's position/flux. Fall back to a single FWHM for
-            # controllers that don't publish the ensemble fields.
+            # report the ensemble actually fit, not one star's position/flux;
+            # fall back to plain FWHM for controllers without the ensemble fields
             metric_name = star.get("METRIC_NAME", "FWHM")
             metric = star.get("METRIC", star.get("FWHM_IMAGE", float("nan")))
             sigma = star.get("METRIC_SIGMA")
