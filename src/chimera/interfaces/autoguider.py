@@ -28,12 +28,14 @@ class GuiderException(ChimeraException):
 
 
 class Autoguider(Interface):
+    # Guider-agnostic settings only. Implementations that drive an external
+    # guider (PHD2, TheSkyX) own their camera and mount, so no site/telescope/
+    # camera here; they add their own connection config.
     __config__ = {
-        "site": "/Site/0",  # Telescope Site.
-        "telescope": "/Telescope/0",  # Telescope instrument that will be guided by the autoguider.
-        "camera": "/Camera/0",  # Guider camera instrument.
         "max_acquire_tries": 3,  # Number of tries to find a guiding star.
-        "max_fit_tries": 3,  # Number of tries to acquire the guide star offset before being lost.
+        # Settling: only meaningful for guiders that expose per-frame errors
+        # (PHD2). Guiders that just report a state (TheSkyX) ignore these and
+        # use their own start timeout.
         "settle_pixels": 1.5,  # Maximum guide distance (pixels) to consider guiding settled/stable.
         "settle_time": 10.0,  # Minimum time (s) the guider must remain below settle_pixels.
         "settle_timeout": 60.0,  # Maximum time (s) to wait for the guider to settle.
