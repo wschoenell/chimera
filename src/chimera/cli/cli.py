@@ -3,6 +3,7 @@ import enum
 # TODO migrate to argparse
 import optparse
 import random
+import signal
 import sys
 import threading
 from collections.abc import Callable
@@ -17,6 +18,10 @@ from chimera.core.url import parse_url
 from chimera.core.version import chimera_version
 
 __all__ = ["ChimeraCLI", "Action", "Parameter", "action", "parameter"]
+
+# per-call timeout for CLI proxies; must exceed the longest single call
+# (e.g. autofocus.focus() runs for minutes server-side)
+CLI_REQUEST_TIMEOUT = 1200.0
 
 
 class ParameterType(enum.StrEnum):
@@ -373,12 +378,20 @@ class ChimeraCLI:
         self._run(cmdline_args)
 
     def wait(self, abort: bool = True):
+        # abort here in the main thread while the bus is still up: run_forever()
+        # shuts the bus down on KeyboardInterrupt before an abort could be sent
+        if abort:
+
+            def _on_sigint(signum, frame):
+                signal.signal(signal.SIGINT, signal.SIG_DFL)  # 2nd Ctrl-C hard-kills
+                self.abort()
+
+            try:
+                signal.signal(signal.SIGINT, _on_sigint)
+            except ValueError:
+                pass  # not the main thread; keep default handling
+
         self.bus.run_forever()
-
-        # FIXME: bus is already dead now, cannot abort anymore
-        # if abort:
-        #     self.abort()
-
         self.bus.shutdown()
 
     def abort(self):
@@ -614,7 +627,9 @@ class ChimeraCLI:
                     f"{self.config.host}:{self.config.port}{inst.default}"
                 )
 
-            inst_proxy = Proxy(inst.url.url, self.bus)
+            # bound calls so a lost reply raises RequestTimeoutException
+            # instead of hanging forever
+            inst_proxy = Proxy(inst.url.url, self.bus, timeout=CLI_REQUEST_TIMEOUT)
             try:
                 inst_proxy.resolve()
                 setattr(self, inst.name, inst_proxy)
