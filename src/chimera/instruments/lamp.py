@@ -4,10 +4,10 @@
 
 from chimera.core.chimeraobject import ChimeraObject
 from chimera.core.lock import lock
-from chimera.interfaces.lamp import LampSwitch
+from chimera.interfaces.lamp import Lamp, LampSwitch
 
 
-class LampBase(ChimeraObject, LampSwitch):
+class LampBase(ChimeraObject, Lamp, LampSwitch):
     def __init__(self):
         ChimeraObject.__init__(self)
 

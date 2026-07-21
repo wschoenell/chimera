@@ -3,9 +3,11 @@
 # SPDX-FileCopyrightText: 2006-present Paulo Henrique Silva <ph.silva@gmail.com>
 
 import argparse
+import faulthandler
 import logging
 import os.path
 import platform
+import signal
 import sys
 from typing import Any
 
@@ -160,6 +162,9 @@ class ChimeraCLI:
 
 
 def main():
+    # kill -USR1 <pid> dumps all thread stacks (deadlock diagnosis)
+    if hasattr(signal, "SIGUSR1"):
+        faulthandler.register(signal.SIGUSR1, all_threads=True)
     cli = ChimeraCLI()
     cli.run()
 

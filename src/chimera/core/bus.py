@@ -3,6 +3,7 @@ import logging
 import queue
 import selectors
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from typing import Any, NamedTuple
 
 import msgspec
 
+from chimera.core.exceptions import RequestTimeoutException
 from chimera.core.protocol import (
     Event,
     Messages,
@@ -59,7 +61,15 @@ class Bus:
     def __init__(self, url: str):
         self.url = create_url(url, cls="Bus")
 
-        self._pool = ThreadPoolExecutor()
+        # request handlers may issue nested requests that block until
+        # another worker serves them: the default size deadlocks under load
+        self._pool = ThreadPoolExecutor(max_workers=64)
+
+        # event callbacks get their own pool: sharing the request pool let
+        # slow callbacks starve the workers their nested requests needed
+        self._event_pool = ThreadPoolExecutor(
+            max_workers=64, thread_name_prefix="bus-event"
+        )
 
         self._running = threading.Event()
         self._bus_started = threading.Event()
@@ -92,6 +102,13 @@ class Bus:
         # Maximum consecutive failures before we consider a connection dead
         self._max_send_failures = 3
 
+        # Buses we just declared dead: skipped for a cooldown so a killed
+        # peer (e.g. a Ctrl-C'd CLI that never unsubscribed) can't make us
+        # redial-and-fail on every single event. Keyed by bus url -> deadline
+        # (time.monotonic seconds).
+        self._outbound_dead: dict[str, float] = {}
+        self._outbound_dead_cooldown = 30.0  # seconds
+
         self._encoder = msgspec.json.Encoder()
         self._decoder = msgspec.json.Decoder(Messages)
 
@@ -112,6 +129,8 @@ class Bus:
 
             self._process_queue_future.result()
             self._pool.shutdown()
+            # no wait: a blocked callback would hang the shutdown
+            self._event_pool.shutdown(wait=False, cancel_futures=True)
 
             self._inbound.close()
             self._internal.close()
@@ -170,57 +189,92 @@ class Bus:
             else:
                 self._q[self.url.url].put(message)
         else:
+            now = time.monotonic()
+
+            # Look up / lazily create the outbound transport under the lock,
+            # but do the (potentially slow) encode + send WITHOUT it, so a
+            # dead or slow subscriber can never serialize delivery to the
+            # healthy ones. connect() is async (see TransportNNG), so holding
+            # the lock across it is cheap now.
+            connect_failed = False
             with self._outbound_lock:
-                if message.dst_bus not in self._outbound:
-                    # TODO: define some policy to handle closing of these sockets when not in use
-                    self._outbound[message.dst_bus] = create_transport(message.dst_bus)
+                transport = self._outbound.get(message.dst_bus)
+                if transport is None:
+                    # skip buses we recently declared dead, so a killed peer
+                    # doesn't cost a redial on every event until cleanup runs
+                    dead_until = self._outbound_dead.get(message.dst_bus, 0.0)
+                    if now < dead_until:
+                        return
+                    transport = create_transport(message.dst_bus)
                     try:
-                        self._outbound[message.dst_bus].connect()
-                        self._outbound_failures[message.dst_bus] = 0
+                        transport.connect()
                     except Exception:
-                        log.exception(
+                        log.debug(
                             f"bus: failed to connect to outbound bus: {message.dst_bus}"
                         )
-                        return
-
-                try:
-                    message_bytes = self._encoder.encode(message)
-                except Exception:
-                    log.exception(f"bus: failed to encode message: {message}")
-                    return
-
-                # Non-blocking send - if it fails, log and continue
-                # This prevents blocking on dead or slow remote buses
-                if not self._outbound[message.dst_bus].send(message_bytes):
-                    self._outbound_failures[message.dst_bus] += 1
-
-                    if (
-                        self._outbound_failures[message.dst_bus]
-                        >= self._max_send_failures
-                    ):
-                        log.debug(
-                            f"bus: too many failures ({self._outbound_failures[message.dst_bus]}) "
-                            f"sending to {message.dst_bus}, closing connection"
-                        )
-                        # Close and remove the dead connection
                         try:
-                            self._outbound[message.dst_bus].close()
+                            transport.close()
                         except Exception:
                             pass
-                        del self._outbound[message.dst_bus]
-                        del self._outbound_failures[message.dst_bus]
-
-                        # Clean up dead subscribers from this bus
-                        self._cleanup_dead_subscribers(message.dst_bus)
-                    else:
-                        log.debug(
-                            f"bus: failed to send message to {message.dst_bus} "
-                            f"({self._outbound_failures[message.dst_bus]}/{self._max_send_failures}), "
-                            f"remote bus may be dead or send buffer full"
+                        # treat a refused connect like a send failure: drop
+                        # its subscribers and back off, instead of retrying
+                        # (and re-logging) forever
+                        self._outbound_dead[message.dst_bus] = (
+                            now + self._outbound_dead_cooldown
                         )
-                else:
-                    # Send succeeded, reset failure counter
+                        connect_failed = True
+                    else:
+                        self._outbound[message.dst_bus] = transport
+                        self._outbound_failures[message.dst_bus] = 0
+                        self._outbound_dead.pop(message.dst_bus, None)
+
+            if connect_failed:
+                # drop subscribers outside the outbound lock (cleanup takes
+                # the pubsub lock; never nest the two)
+                self._cleanup_dead_subscribers(message.dst_bus)
+                return
+
+            try:
+                message_bytes = self._encoder.encode(message)
+            except Exception:
+                log.exception(f"bus: failed to encode message: {message}")
+                return
+
+            # bounded-blocking send (see TransportNNG.send); no global lock held
+            ok = transport.send(message_bytes)
+
+            with self._outbound_lock:
+                # a concurrent failure may already have replaced/removed this
+                # transport; only act on the one we actually sent through
+                if self._outbound.get(message.dst_bus) is not transport:
+                    return
+                if ok:
                     self._outbound_failures[message.dst_bus] = 0
+                    return
+                self._outbound_failures[message.dst_bus] += 1
+                if self._outbound_failures[message.dst_bus] < self._max_send_failures:
+                    log.debug(
+                        f"bus: failed to send message to {message.dst_bus} "
+                        f"({self._outbound_failures[message.dst_bus]}/{self._max_send_failures}), "
+                        f"remote bus may be dead or send buffer full"
+                    )
+                    return
+                log.debug(
+                    f"bus: too many failures ({self._outbound_failures[message.dst_bus]}) "
+                    f"sending to {message.dst_bus}, closing connection"
+                )
+                try:
+                    transport.close()
+                except Exception:
+                    pass
+                del self._outbound[message.dst_bus]
+                del self._outbound_failures[message.dst_bus]
+                self._outbound_dead[message.dst_bus] = (
+                    now + self._outbound_dead_cooldown
+                )
+
+            # drop the dead bus's subscribers outside the outbound lock
+            self._cleanup_dead_subscribers(message.dst_bus)
 
     def _pop(
         self, /, key: str | None = None, timeout: float | None = None
@@ -303,16 +357,26 @@ class Bus:
 
         self._push(ping)
 
-        try:
-            response = self._pop(ping.src, timeout=timeout)
-        except queue.Empty:
-            return ping.pong(ok=False)
-        if response is None or not isinstance(response, Pong):
-            return None
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                response = self._pop(
+                    ping.src, timeout=max(0.001, deadline - time.monotonic())
+                )
+            except queue.Empty:
+                return ping.pong(ok=False)
+            if response is None:
+                # shutdown flushed the queues: the bus is really dead
+                return None
+            if not isinstance(response, Pong):
+                # stale leftover of an earlier timed-out exchange on this
+                # src queue; drop it and keep waiting for our pong
+                log.debug(
+                    f"bus: discarding stale message while waiting for pong: {response}"
+                )
+                continue
+            return response
 
-        return response
-
-    # TODO: add timeout?
     def request(
         self,
         *,
@@ -321,7 +385,18 @@ class Bus:
         method: str,
         args: list[Any] | None = None,
         kwargs: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> None | Response:
+        """Send a request and wait for its response.
+
+        With ``timeout`` (seconds) a lost response raises
+        :class:`~chimera.core.exceptions.RequestTimeoutException` instead of
+        blocking forever; without it the call blocks until the response
+        arrives or the bus shuts down.  Stale messages left on the queue by
+        earlier timed-out exchanges (a late pong, a response to a request
+        that already timed out) are discarded instead of being mistaken for
+        a dead bus.
+        """
         request = Protocol.request(
             src=parse_url(src).url,
             dst=parse_url(dst).url,
@@ -332,11 +407,26 @@ class Bus:
 
         self._push(request)
 
-        response = self._pop(request.src)
-        if response is None or not isinstance(response, Response):
-            raise RuntimeError("bus is dead")
-
-        return response
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            remaining = (
+                None if deadline is None else max(0.001, deadline - time.monotonic())
+            )
+            try:
+                response = self._pop(request.src, timeout=remaining)
+            except queue.Empty:
+                raise RequestTimeoutException(
+                    f"no response for {request.dst}.{method}() after {timeout}s"
+                ) from None
+            if response is None:
+                # shutdown flushed the queues: the bus is really dead
+                raise RuntimeError("bus is dead")
+            if not isinstance(response, Response) or response.id != request.id:
+                log.debug(
+                    f"bus: discarding stale message while waiting for response: {response}"
+                )
+                continue
+            return response
 
     def subscribe(
         self,
@@ -522,13 +612,18 @@ class Bus:
             urls = set([sub.subscriber.bus for sub in subscribers])
 
             for url in urls:
-                event = message.callback(
-                    dst=url,
-                    event=message.event,
-                    args=message.args,
-                    kwargs=message.kwargs,
-                )
-                self._push(event)
+                # isolate each subscriber: a failure delivering to one must
+                # not skip the others that share this event
+                try:
+                    event = message.callback(
+                        dst=url,
+                        event=message.event,
+                        args=message.args,
+                        kwargs=message.kwargs,
+                    )
+                    self._push(event)
+                except Exception:
+                    log.exception(f"error publishing event to {url}")
         except Exception:
             log.exception("error handling publish")
 
@@ -538,10 +633,13 @@ class Bus:
 
             for callback in self._callbacks[event_id].values():
                 method = callback.callable
-                # NOTE: we cannot see exception happening inside the event handlers,
-                #       so we schedule a check on the future result in a separate task.
-                event_future = self._pool.submit(method, *event.args, **event.kwargs)
-                self._pool.submit(self._check_event_result, event, event_future)
+                event_future = self._event_pool.submit(
+                    method, *event.args, **event.kwargs
+                )
+                # done-callback: no worker parked just to log exceptions
+                event_future.add_done_callback(
+                    lambda future, event=event: self._check_event_result(event, future)
+                )
         except Exception:
             log.exception("error handling event")
 

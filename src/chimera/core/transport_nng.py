@@ -23,7 +23,15 @@ class TransportNNG(Transport):
     @override
     def connect(self):
         self._sk = pynng.Push0()
-        self._sk.dial(f"{self.url}", block=True)
+        # bounded backpressure: wait a little for buffer space, then fail the
+        # send instead of parking a bus worker for seconds on a dead peer
+        self._sk.send_timeout = 1000  # ms
+        # async dial: never block the caller here. nng establishes the pipe
+        # in the background and auto-reconnects; a dead peer simply never
+        # connects and later sends fail fast (bounded by send_timeout). A
+        # blocking dial used to stall every event publish while the bus held
+        # its outbound lock, starving delivery to healthy subscribers.
+        self._sk.dial(f"{self.url}", block=False)
 
     @override
     def close(self):
@@ -36,7 +44,9 @@ class TransportNNG(Transport):
     def send(self, data: bytes) -> bool:
         assert self._sk is not None
         try:
-            self._sk.send(data, block=False)
+            # blocking (bounded by send_timeout): wait for buffer space
+            # rather than drop the message
+            self._sk.send(data, block=True)
             return True
         except pynng.TryAgain:
             # Would block - send buffer is full

@@ -109,7 +109,7 @@ class ChimeraTel(ChimeraCLI):
             f"{tag} position ra/dec: {Coord.from_h(ra).to_hms()}/{Coord.from_d(dec).to_dms()}"
         )
         self.out(
-            f"{tag} position alt/az: {Coord.from_d(alt).to_dms()}/{Coord.from_d(az).to_hms()}"
+            f"{tag} position alt/az: {Coord.from_d(alt).to_dms()}/{Coord.from_d(az).to_dms()}"
         )
 
     @action(
@@ -123,7 +123,7 @@ class ChimeraTel(ChimeraCLI):
         else:
             target = self._validate_coords(options)
 
-        def slew_begin(ra, dec):
+        def slew_begin(ra, dec, epoch):
             self.out(40 * "=")
             if options.object_name:
                 self.out(

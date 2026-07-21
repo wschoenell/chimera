@@ -208,12 +208,15 @@ class ChimeraSched(ChimeraCLI):
                         self.out("\tTarget name: %s" % actconfig["name"])
                         act.target_name = actconfig["name"]
 
-                    if (
-                        "offset" not in actconfig
-                        and "dome_az" not in actconfig
-                        and "dome_tracking" not in actconfig
-                        and "name" not in actconfig
-                    ):
+                    has_target = (
+                        ("ra" in actconfig and "dec" in actconfig)
+                        or ("alt" in actconfig and "az" in actconfig)
+                        or "name" in actconfig
+                        or "offset" in actconfig
+                        or "dome_az" in actconfig
+                        or "dome_tracking" in actconfig
+                    )
+                    if not has_target:
                         self.exit(
                             "[%s] Nothing to point at! %s" % (red("ERROR"), actconfig)
                         )
@@ -475,13 +478,33 @@ class ChimeraSched(ChimeraCLI):
         self.scheduler.action_complete += action_complete_clbk
         self.scheduler.state_changed += state_changed_clbk
 
+        def unsubscribe():
+            # tell the server to drop our subscriptions; otherwise it keeps
+            # trying (and failing) to push events to this now-dead process,
+            # which stalls delivery to other clients and the scheduler itself
+            try:
+                self.scheduler.program_begin -= program_begin_clbk
+                self.scheduler.program_complete -= program_complete_clbk
+                self.scheduler.action_begin -= action_begin_clbk
+                self.scheduler.action_complete -= action_complete_clbk
+                self.scheduler.state_changed -= state_changed_clbk
+            except Exception:
+                pass
+
         if self.scheduler.state() == State.OFF:
             self.out("%s no programs to do" % blue("[scheduler]"))
 
-        while True:
-            if self.scheduler.state() == State.OFF:
-                self.exit()
-            time.sleep(0.1)
+        try:
+            while True:
+                if self.scheduler.state() == State.OFF:
+                    unsubscribe()
+                    self.exit()
+                time.sleep(0.1)
+        except (KeyboardInterrupt, SystemExit):
+            unsubscribe()
+            raise
+        finally:
+            unsubscribe()
 
 
 def main():

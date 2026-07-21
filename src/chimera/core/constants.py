@@ -46,3 +46,19 @@ SYSTEM_CONFIG_DEFAULT_SAMPLE = os.path.join(
 SYSTEM_CONFIG_LOG_NAME = os.path.join(SYSTEM_CONFIG_DIRECTORY, "chimera.log")
 
 DEFAULT_PROGRAM_DATABASE = os.path.join(SYSTEM_CONFIG_DIRECTORY, "scheduler.db")
+
+# Available instrument interface classes
+INSTRUMENT_CLASSES = [
+    "Camera",
+    "Dome",
+    "Fan",
+    "FilterWheel",
+    "Focuser",
+    "Lamp",
+    "Rotator",
+    "Telescope",
+    "WeatherStation",
+]
+
+# Available controller interface classes
+CONTROLLER_CLASSES = ["Autofocus", "Autoflat", "PointVerify", "Operator"]

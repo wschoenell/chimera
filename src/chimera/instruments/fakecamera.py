@@ -170,17 +170,26 @@ class FakeCamera(CameraBase):
 
         ccd_width, ccd_height = self.get_physical_size()
 
+        # When rotating, generate a square image with side equal to the
+        # detector diagonal so the rotated frame fully covers the detector
+        # at any angle.
+        if rotator:
+            img_width = img_height = int(np.ceil(np.sqrt(ccd_width**2 + ccd_height**2)))
+        else:
+            img_width = ccd_width
+            img_height = ccd_height
+
         if image_request["type"].upper() == "DARK":
             self.log.info("making dark")
             pix = self.make_dark(
-                (ccd_height, ccd_width), np.float32, image_request["exptime"]
+                (img_height, img_width), np.float32, image_request["exptime"]
             )
         elif image_request["type"].upper() == "FLAT":
             self.log.info("making flat")
-            pix = self.make_flat((ccd_height, ccd_width), np.float32) / 1000
+            pix = self.make_flat((img_height, img_width), np.float32) / 1000
         elif image_request["type"].upper() == "BIAS":
             self.log.info("making bias")
-            pix = self.make_dark((ccd_height, ccd_width), np.float32, 0)
+            pix = self.make_dark((img_height, img_width), np.float32, 0)
         else:
             if telescope and dome:
                 self.log.debug("Dome open? " + str(dome.is_slit_open()))
@@ -215,15 +224,15 @@ class FakeCamera(CameraBase):
                         if tel_position.dec.deg < -25:
                             query_args["v"] = "poss2ukstu_red"
                             query_args["h"] = (
-                                ccd_height / 59.5
+                                img_height / 59.5
                             )  # ~1"/pix (~60 pix/arcmin) is the plate scale of DSS POSS2-Red
-                            query_args["w"] = ccd_width / 59.5
+                            query_args["w"] = img_width / 59.5
                         else:
                             query_args["v"] = "poss1_red"
                             query_args["h"] = (
-                                ccd_height / 35.3
+                                img_height / 35.3
                             )  # 1.7"/pix (35.3 pix/arcmin) is the plate scale of DSS POSS1-Red
-                            query_args["w"] = ccd_width / 35.3
+                            query_args["w"] = img_width / 35.3
 
                         url += urllib.parse.urlencode(query_args)
 
@@ -248,7 +257,7 @@ class FakeCamera(CameraBase):
                         self.log.debug("Dome not aligned... making flat image...")
                         try:
                             pix = (
-                                self.make_flat((ccd_height, ccd_width), np.float32)
+                                self.make_flat((img_height, img_width), np.float32)
                                 / 1000
                             )
                         except Exception as e:
@@ -259,23 +268,40 @@ class FakeCamera(CameraBase):
         if pix is None:
             try:
                 self.log.info(
-                    "Making flat image: " + str(ccd_height) + "x" + str(ccd_width)
+                    "Making flat image: " + str(img_height) + "x" + str(img_width)
                 )
-                pix = self.make_flat((ccd_height, ccd_width), np.float32)
+                pix = self.make_flat((img_height, img_width), np.float32)
             except Exception as e:
                 self.log.warning("Make flat error: " + str(e))
 
         # Last resort if nothing else could make a picture
         if pix is None:
-            pix = np.zeros((ccd_height, ccd_width), dtype=np.int32)
+            pix = np.zeros((img_height, img_width), dtype=np.int32)
 
-        # Rotate image
+        # Rotate image, then crop the oversized frame back to detector size
         if rotator:
+            # DSS may return fewer pixels than requested; pad up to the
+            # expected source size so the rotated frame still covers the
+            # detector after cropping.
+            if pix.shape[0] < img_height or pix.shape[1] < img_width:
+                pad_y = max(0, img_height - pix.shape[0])
+                pad_x = max(0, img_width - pix.shape[1])
+                pix = np.pad(
+                    pix,
+                    (
+                        (pad_y // 2, pad_y - pad_y // 2),
+                        (pad_x // 2, pad_x - pad_x // 2),
+                    ),
+                    mode="edge",
+                )
             angle = rotator.get_position()
             self.log.debug(f"Rotating image by {angle} degrees")
             pix = self.rotate(
                 pix, angle, reshape=False
             )  # Position Angle (PA) is Counter-Clockwise
+            y0 = (pix.shape[0] - ccd_height) // 2
+            x0 = (pix.shape[1] - ccd_width) // 2
+            pix = pix[y0 : y0 + ccd_height, x0 : x0 + ccd_width]
 
         image = self._save_image(
             image_request,
