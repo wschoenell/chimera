@@ -19,6 +19,9 @@ from chimera.core.version import chimera_version
 
 __all__ = ["ChimeraCLI", "Action", "Parameter", "action", "parameter"]
 
+#: how long Ctrl-C waits for __abort__ before exiting anyway
+ABORT_TIMEOUT = 15.0
+
 # per-call timeout for CLI proxies; must exceed the longest single call
 # (e.g. autofocus.focus() runs for minutes server-side)
 CLI_REQUEST_TIMEOUT = 1200.0
@@ -403,10 +406,17 @@ class ChimeraCLI:
         if hasattr(self, "__abort__"):
             abort = getattr(self, "__abort__")
             if hasattr(abort, "__call__"):
-                t = threading.Thread(target=abort)
+                # daemon + bounded join: __abort__ talks to instruments over
+                # proxies, and one slow/unreachable one must not make Ctrl-C
+                # hang forever. It keeps running in the background.
+                t = threading.Thread(target=abort, name="cli-abort", daemon=True)
                 t.start()
                 try:
-                    t.join()
+                    t.join(ABORT_TIMEOUT)
+                    if t.is_alive():
+                        self.err(
+                            f"\nabort still running after {ABORT_TIMEOUT:.0f}s; exiting anyway."
+                        )
                 except KeyboardInterrupt:
                     pass
 
