@@ -35,6 +35,10 @@ class Scheduler(ChimeraObject):
         "operator": "/Operator/0",
         "site": "/Site/0",
         "algorithm": SchedulingAlgorithm.SEQUENTIAL,
+        # leave the mount idle once a program ends, however it ended. Default
+        # on: a program that finishes with tracking left running walks the
+        # mount into a limit unattended.
+        "stop_tracking_on_program_end": True,
     }
 
     def __init__(self):

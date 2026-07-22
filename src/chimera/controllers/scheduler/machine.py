@@ -1,6 +1,5 @@
 import logging
 import threading
-import time
 
 from chimera.controllers.scheduler.model import Program, Session
 from chimera.controllers.scheduler.states import State
@@ -8,6 +7,11 @@ from chimera.controllers.scheduler.status import SchedulerStatus
 from chimera.core.exceptions import ProgramExecutionAborted, ProgramExecutionException
 
 log = logging.getLogger(__name__)
+
+#: how long the state machine waits for an abort before carrying on. The
+#: abort itself keeps running in the background; this only bounds how long
+#: the machine is unable to see a new START.
+STOP_ABORT_TIMEOUT = 30.0
 
 
 class Machine(threading.Thread):
@@ -23,6 +27,15 @@ class Machine(threading.Thread):
         self.controller = controller
 
         self.current_program = None
+        # handle on the thread running the current program, so the IDLE
+        # branch can tell whether one is still in flight
+        self._worker = None
+        # set by STOP/SHUTDOWN to cancel a program that is still waiting
+        # for its slew time. Without it the wait was an uninterruptible
+        # time.sleep(): a program queued for 07:50 held the machine for
+        # 90 minutes and --stop could not touch it, because executor.stop()
+        # only aborts the CURRENT action and this one had not started any.
+        self._cancel_wait = threading.Event()
 
         self.daemon = False
 
@@ -62,6 +75,25 @@ class Machine(threading.Thread):
                 self.state(State.IDLE)
 
             if self.state() == State.IDLE:
+                # A program already executing must not be picked again.
+                # START overwrites BUSY, so every start() arriving while a
+                # program ran sent us back through here, next(scheduler)
+                # returned the SAME still-unfinished program and _process
+                # forked another thread for it. Seen live: robobs calls
+                # start() once per program it queues, and five concurrent
+                # autofocus runs plus four concurrent sky flats were racing
+                # on one camera.
+                if self._worker is not None and self._worker.is_alive():
+                    # Wait for it rather than picking another program. POLL,
+                    # do not sleep on the condition variable: the worker sets
+                    # IDLE from inside its own thread just before exiting, so
+                    # the wakeup can arrive before we sleep and be lost - the
+                    # machine then parked forever with nothing left to wake
+                    # it (seen live 2026-07-22, right after an autofocus
+                    # failed and its worker signalled IDLE on the way out).
+                    self._worker.join(1.0)
+                    continue
+
                 log.debug("[idle] looking for something to do...")
 
                 # find something to do
@@ -71,6 +103,7 @@ class Machine(threading.Thread):
                     log.debug("[idle] there is something to do, processing...")
                     log.debug("[idle] program slew start %s", program.start_at)
                     self.state(State.BUSY)
+                    self._cancel_wait.clear()
                     self.current_program = program
                     self._process(program)
                     continue
@@ -86,11 +119,38 @@ class Machine(threading.Thread):
 
             elif self.state() == State.STOP:
                 log.debug("[stop] trying to stop current program")
-                self.executor.stop()
-                self.state(State.OFF)
+                # release a program still counting down to its slew time
+                self._cancel_wait.set()
+                # Run the abort OFF this thread. It reaches the camera through
+                # a proxy, and that request cannot be served until the current
+                # exposure and its readout finish - 280 s observed on a QHY600.
+                # Doing it inline froze the whole state machine for that long:
+                # a chimera-sched --start in the meantime was invisible and the
+                # scheduler looked permanently wedged (2026-07-22).
+                stopper = threading.Thread(
+                    target=self.executor.stop, name="scheduler-stop", daemon=True
+                )
+                stopper.start()
+                stopper.join(STOP_ABORT_TIMEOUT)
+                if stopper.is_alive():
+                    log.warning(
+                        "[stop] abort still running after %.0f s; carrying on "
+                        "(it will finish in the background)",
+                        STOP_ABORT_TIMEOUT,
+                    )
+                # executor.stop() blocks until the running action gives up -
+                # for a camera that is the rest of the exposure plus readout.
+                # A START requested in that window (chimera-sched --start)
+                # only flips the state variable, because this thread is not
+                # reading it; dropping unconditionally to OFF here threw that
+                # request away, so the scheduler stayed dead and the CLI
+                # looked like it did nothing.
+                if self.state() == State.STOP:
+                    self.state(State.OFF)
 
             elif self.state() == State.SHUTDOWN:
                 log.debug("[shutdown] trying to stop current program")
+                self._cancel_wait.set()
                 self.executor.stop()
                 log.debug("[shutdown] should die soon.")
                 break
@@ -117,6 +177,32 @@ class Machine(threading.Thread):
             program.finished = False
 
         session.commit()
+
+    def _stop_tracking(self):
+        """Leave the mount idle at the end of a program.
+
+        Called inline on the program thread, before program_complete and
+        before the machine returns to IDLE. Ordering matters: issued from a
+        detached thread instead, the stop blocks on the telescope lock behind
+        the *next* program's slew and lands after it, untracking the target
+        that program just acquired (seen live 2026-07-21, robobs).
+        """
+        if not self.controller["stop_tracking_on_program_end"]:
+            return
+
+        location = self.controller["telescope"]
+        # a string-typed chimera config key coerces None to "None"
+        if not location or str(location).lower() in ("none", ""):
+            return
+
+        try:
+            telescope = self.controller.get_proxy(location)
+            if telescope.is_tracking():
+                telescope.stop_tracking()
+                log.info("Tracking stopped at program end.")
+        except Exception:
+            # never let this fail the program that just ran
+            log.exception("Could not stop telescope tracking at program end.")
 
     def _process(self, program):
         def process():
@@ -153,7 +239,14 @@ class Machine(threading.Thread):
                         real_wait,
                         speedup,
                     )
-                    time.sleep(real_wait)
+                    if self._cancel_wait.wait(real_wait):
+                        log.debug("[start] wait cancelled; abandoning %s", str(task))
+                        self.controller.program_complete(
+                            program.id,
+                            SchedulerStatus.ABORTED,
+                            "Aborted while waiting for its slew time.",
+                        )
+                        return
                 else:
                     if program.valid_for >= 0.0:
                         if -wait_time > program.valid_for:
@@ -182,10 +275,12 @@ class Machine(threading.Thread):
                 self.executor.execute(task)
                 log.debug(f"[finish] {str(task)}")
                 self.scheduler.done(task)
+                self._stop_tracking()
                 self.controller.program_complete(program.id, SchedulerStatus.OK)
                 self.state(State.IDLE)
             except ProgramExecutionException as e:
                 self.scheduler.done(task, error=e)
+                self._stop_tracking()
                 self.controller.program_complete(
                     program.id, SchedulerStatus.ERROR, str(e)
                 )
@@ -193,6 +288,7 @@ class Machine(threading.Thread):
                 log.debug(f"[error] {str(task)} ({str(e)})")
             except ProgramExecutionAborted as e:
                 self.scheduler.done(task, error=e)
+                self._stop_tracking()
                 self.controller.program_complete(
                     program.id, SchedulerStatus.ABORTED, "Aborted by user."
                 )
@@ -201,6 +297,7 @@ class Machine(threading.Thread):
 
             session.commit()
 
-        t = threading.Thread(target=process)
+        t = threading.Thread(target=process, name="scheduler-program")
         t.daemon = False
+        self._worker = t
         t.start()
