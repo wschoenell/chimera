@@ -60,16 +60,13 @@ class Site(ChimeraObject):
         # convert date to a non-naive datetime with TZ set to UTC
         time_tuple = date.tuple()
         time_tuple = tuple(int(t) for t in time_tuple)
-        time_tuple += (0, self.utc_tz)
+        time_tuple += (0, tz.tzutc())
         d_utc = dt.datetime(*time_tuple)
         # then return it in local timezone
-        return d_utc.astimezone(self.utc_tz)
+        return d_utc.astimezone(tz.tzutc())
 
     local_tz = property(lambda self: tz.tzlocal())
     utc_tz = property(lambda self: tz.tzutc())
-
-    def get_ephem_site(self, date):
-        return self._get_ephem(date)
 
     def jd(self, t=None):
         if not t:
@@ -134,8 +131,6 @@ class Site(ChimeraObject):
         """
         Mean Local Sidereal Time
         """
-        # lst = self._get_ephem(self.ut()).sidereal_time()
-        # required since a Coord cannot be constructed from an Ephem.Angle
         if not date:
             date = self.ut()
         lst_c = Coord.from_r(self.lst_in_rads(date))
