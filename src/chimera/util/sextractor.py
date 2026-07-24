@@ -391,9 +391,10 @@ class SExtractor:
                     close_fds=True,
                 )
                 (_out_err, _in) = (p.stdout, p.stdin)
-                versionline = _out_err.read().decode()
-                # "SExtractor" up to 2.25; "Source Extractor" since the
-                # 2.28 rename (Debian/Fedora package: source-extractor)
+                # decode(errors="replace"): locale banners must not crash
+                # detection. "SExtractor" up to 2.25; "Source Extractor"
+                # since the 2.28 rename (package: source-extractor).
+                versionline = _out_err.read().decode(errors="replace")
                 if "SExtractor" in versionline or "Source Extractor" in versionline:
                     selected = candidate
                     break
