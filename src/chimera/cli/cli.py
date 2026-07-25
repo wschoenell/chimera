@@ -4,7 +4,6 @@ import logging
 # TODO migrate to argparse
 import optparse
 import random
-import signal
 import sys
 import threading
 from collections.abc import Callable
@@ -24,13 +23,6 @@ from chimera.core.url import parse_url
 from chimera.core.version import chimera_version
 
 __all__ = ["ChimeraCLI", "Action", "Parameter", "action", "parameter"]
-
-#: how long Ctrl-C waits for __abort__ before exiting anyway
-ABORT_TIMEOUT = 15.0
-
-# per-call timeout for CLI proxies; must exceed the longest single call
-# (e.g. autofocus.focus() runs for minutes server-side)
-CLI_REQUEST_TIMEOUT = 1200.0
 
 
 class ParameterType(enum.StrEnum):
@@ -392,20 +384,12 @@ class ChimeraCLI:
         self._run(cmdline_args)
 
     def wait(self, abort: bool = True):
-        # abort here in the main thread while the bus is still up: run_forever()
-        # shuts the bus down on KeyboardInterrupt before an abort could be sent
-        if abort:
-
-            def _on_sigint(signum, frame):
-                signal.signal(signal.SIGINT, signal.SIG_DFL)  # 2nd Ctrl-C hard-kills
-                self.abort()
-
-            try:
-                signal.signal(signal.SIGINT, _on_sigint)
-            except ValueError:
-                pass  # not the main thread; keep default handling
-
         self.bus.run_forever()
+
+        # FIXME: bus is already dead now, cannot abort anymore
+        # if abort:
+        #     self.abort()
+
         self.bus.shutdown()
         sys.exit(self._exit_code)
 
@@ -418,17 +402,10 @@ class ChimeraCLI:
         if hasattr(self, "__abort__"):
             abort = getattr(self, "__abort__")
             if hasattr(abort, "__call__"):
-                # daemon + bounded join: __abort__ talks to instruments over
-                # proxies, and one slow/unreachable one must not make Ctrl-C
-                # hang forever. It keeps running in the background.
-                t = threading.Thread(target=abort, name="cli-abort", daemon=True)
+                t = threading.Thread(target=abort)
                 t.start()
                 try:
-                    t.join(ABORT_TIMEOUT)
-                    if t.is_alive():
-                        self.err(
-                            f"\nabort still running after {ABORT_TIMEOUT:.0f}s; exiting anyway."
-                        )
+                    t.join()
                 except KeyboardInterrupt:
                     pass
 
@@ -649,9 +626,7 @@ class ChimeraCLI:
                     f"{self.config.host}:{self.config.port}{inst.default}"
                 )
 
-            # bound calls so a lost reply raises RequestTimeoutException
-            # instead of hanging forever
-            inst_proxy = Proxy(inst.url.url, self.bus, timeout=CLI_REQUEST_TIMEOUT)
+            inst_proxy = Proxy(inst.url.url, self.bus)
             try:
                 inst_proxy.resolve()
                 setattr(self, inst.name, inst_proxy)

@@ -1,8 +1,8 @@
 from chimera.core.chimeraobject import ChimeraObject
-from chimera.interfaces.fan import Fan, FanControl
+from chimera.interfaces.fan import FanControl
 
 
-class FanBase(ChimeraObject, Fan, FanControl):
+class FanBase(ChimeraObject, FanControl):
     def __init__(self):
         ChimeraObject.__init__(self)
 

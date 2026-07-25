@@ -165,10 +165,6 @@ class ChimeraObject(ILifeCycle, metaclass=MetaObject):
             run_condition = self.control()
             loop_time = time.monotonic() - t0
 
-            if not run_condition:
-                # control() asked to stop: exit and release the pool worker
-                break
-
             time_to_wake_up = (1.0 / self.get_hz()) - loop_time
             if time_to_wake_up > 0:
                 aborted = self._loop_abort.wait(time_to_wake_up)

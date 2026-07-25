@@ -157,7 +157,7 @@ class FakeTelescope(TelescopeBase, TelescopePier):
 
         ra, dec = self.get_position_ra_dec()
         pos = Position.from_ra_dec(ra + Coord.from_as(offset), dec, epoch=Epoch.NOW)
-        self.slew_begin(float(pos.ra), float(pos.dec), Epoch.NOW)
+        self.slew_begin(float(pos.ra), float(pos.dec))
 
         self._ra += float(Coord.from_as(offset).to_h())
         self._set_alt_az_from_ra_dec()

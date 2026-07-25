@@ -372,9 +372,9 @@ class SExtractor:
         """
 
         # -- Finding sextractor program and its version
-        # 'source-extractor' is the Debian/Fedora package name since ~2020
+        # first look for 'sextractor', then 'sex'
 
-        candidates = ["sex", "sextractor", "source-extractor"]
+        candidates = ["sextractor", "sex"]
 
         if path:
             candidates = [path]
@@ -391,11 +391,8 @@ class SExtractor:
                     close_fds=True,
                 )
                 (_out_err, _in) = (p.stdout, p.stdin)
-                # decode(errors="replace"): locale banners must not crash
-                # detection. "SExtractor" up to 2.25; "Source Extractor"
-                # since the 2.28 rename (package: source-extractor).
                 versionline = _out_err.read().decode(errors="replace")
-                if "SExtractor" in versionline or "Source Extractor" in versionline:
+                if versionline.find("SExtractor") != -1:
                     selected = candidate
                     break
             except OSError:

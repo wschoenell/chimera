@@ -374,10 +374,8 @@ class ChimeraCam(ChimeraCLI):
                 self.out("%s " % adc, end="")
             self.out()
 
-        # get_physical_size() is the CCD size in pixels, get_pixel_size()
-        # the pixel pitch in micrometers (see FakeCamera/SBIG)
-        pix_w, pix_h = camera.get_physical_size()
-        pix_w_um, pix_h_um = camera.get_pixel_size()
+        pix_w, pix_h = camera.get_pixel_size()
+        pix_w_um, pix_h_um = camera.get_physical_size()
 
         self.out("=" * 40)
         self.out(f"CCD size (pixel)       : {pix_w} x {pix_h}")
@@ -678,7 +676,6 @@ class ChimeraCam(ChimeraCLI):
             except Exception as e:
                 self.err("Error trying to take exposures. (%s)" % print_exception(e))
         finally:
-            # time.sleep(0.1)  # wait for last events to be printed
             self.out(40 * "=")
             self.out("Total time: %.3fs" % (time.time() - start))
             self.out(40 * "=")

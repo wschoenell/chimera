@@ -285,25 +285,22 @@ class ChimeraDome(ChimeraCLI):
         else:
             self.out("Dome slit is closed.")
 
-        # list the dome's OWN lamps/fans (its config lists), not the
-        # CLI's --lamp/--fan option, which defaults to /Lamp/0 and /Fan/0
-        # and may belong to another instrument entirely
         if self.dome["lamps"] is not None:
-            for lamp_location in self.dome["lamps"]:
-                lamp = self.dome.get_proxy(lamp_location)
-                onoff = green("ON") if lamp.is_switched_on() else red("OFF")
+            for lamp in self.dome["lamps"]:
+                onoff = green("ON") if self.lamp().is_switched_on() else red("OFF")
                 dimming = (
-                    " intensity: %3.2f" % lamp.get_intensity()
-                    if lamp.features("LampDimmer")
+                    " intensity: %3.2f" % self.lamp().get_intensity()
+                    if self.lamp().features("LampDimmer")
                     else ""
                 )
-                self.out("Lamp %s: %s %s" % (lamp.get_location(), onoff, dimming))
+                self.out(
+                    "Lamp %s: %s %s" % (self.lamp().get_location(), onoff, dimming)
+                )
 
         if self.dome["fans"] is not None:
-            for fan_location in self.dome["fans"]:
-                fan = self.dome.get_proxy(fan_location)
-                if fan.features("FanState"):
-                    st = fan.status()
+            for fan in self.dome["fans"]:
+                if self.fan().features("FanState"):
+                    st = self.fan().status()
                     if st == FanStatus.ON:
                         stats = green("ON")
                     elif st == FanStatus.OFF:
@@ -311,19 +308,20 @@ class ChimeraDome(ChimeraCLI):
                     else:
                         stats = yellow(st.__str__())
                 else:
-                    stats = green("ON") if fan.is_switched_on() else red("OFF")
+                    stats = green("ON") if self.fan().is_switched_on() else red("OFF")
                 rotation = (
-                    " speed %.2f" % fan.get_rotation()
-                    if fan.features("FanControllableSpeed")
+                    " speed %.2f" % self.fan().get_rotation()
+                    if self.fan().features("FanControllableSpeed")
                     else ""
                 )
                 direction = (
-                    " direction %s" % fan.get_direction()
-                    if fan.features("FanControllableDirection")
+                    " direction %s" % self.fan().get_direction()
+                    if self.fan().features("FanControllableDirection")
                     else ""
                 )
                 self.out(
-                    "Fan %s: %s%s%s" % (fan.get_location(), stats, rotation, direction)
+                    "Fan %s: %s%s%s"
+                    % (self.fan().get_location(), stats, rotation, direction)
                 )
 
         self.out("=" * 40)

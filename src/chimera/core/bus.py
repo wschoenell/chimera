@@ -281,13 +281,6 @@ class Bus:
         self._health_interval = health_interval
         self._health_timeout = health_timeout
 
-        # Buses we just declared dead: skipped for a cooldown so a killed
-        # peer (e.g. a Ctrl-C'd CLI that never unsubscribed) can't make us
-        # redial-and-fail on every single event. Keyed by bus url -> deadline
-        # (time.monotonic seconds).
-        self._outbound_dead: dict[str, float] = {}
-        self._outbound_dead_cooldown = 30.0  # seconds
-
         self._encoder = msgspec.json.Encoder()
         self._decoder = msgspec.json.Decoder(Messages)
 
@@ -1135,18 +1128,13 @@ class Bus:
             urls = set([sub.subscriber.bus for sub in subscribers])
 
             for url in urls:
-                # isolate each subscriber: a failure delivering to one must
-                # not skip the others that share this event
-                try:
-                    event = message.callback(
-                        dst=url,
-                        event=message.event,
-                        args=message.args,
-                        kwargs=message.kwargs,
-                    )
-                    self._push(event)
-                except Exception:
-                    log.exception(f"error publishing event to {url}")
+                event = message.callback(
+                    dst=url,
+                    event=message.event,
+                    args=message.args,
+                    kwargs=message.kwargs,
+                )
+                self._push(event)
         except Exception:
             log.exception("error handling publish")
 

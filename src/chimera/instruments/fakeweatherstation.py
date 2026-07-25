@@ -35,13 +35,6 @@ class FakeWeatherStation(
         self["model"] = "FakeWeatherStation v1.0"
 
     def _hour_in_radians(self, hour=None):
-        """
-        For testing purposes, the function converts a given hour in radians.
-
-        The default must be computed per call: a `datetime.now()` default
-        argument is evaluated once at import time, freezing the simulated
-        weather for the whole life of the process.
-        """
         if hour is None:
             now = datetime.datetime.now(datetime.UTC)
             hour = now.hour + now.minute / 60.0

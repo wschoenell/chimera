@@ -168,9 +168,6 @@ class ChimeraCLI:
 
 
 def main():
-    # kill -USR1 <pid> dumps all thread stacks (deadlock diagnosis)
-    if hasattr(signal, "SIGUSR1"):
-        faulthandler.register(signal.SIGUSR1, all_threads=True)
     cli = ChimeraCLI()
     cli.run()
 
