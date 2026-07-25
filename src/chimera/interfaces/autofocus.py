@@ -15,10 +15,6 @@ class FocusNotFoundException(ChimeraException):
     pass
 
 
-class AutofocusRunningException(ChimeraException):
-    """Raised when focus() is called while another run is still in progress."""
-
-
 class Autofocus(Interface):
     __config__ = {
         "camera": "/Camera/0",
@@ -47,15 +43,7 @@ class Autofocus(Interface):
         """
         Abort a running focus() ASAP: stop the current exposure and return
         the focuser to its start position. No-op if nothing is running.
-        Runs concurrently with focus(), so it must not take the focus lock,
-        and must return promptly (callers abort other instruments too).
-        """
-
-    def abort(self):
-        """
-        Alias of stop(), for consistency with the rest of chimera
-        (camera.abort_exposure, autoguider.abort, autoflat.abort). The
-        scheduler's abort path calls this name.
+        Runs concurrently with focus(), so it must not take the focus lock.
         """
 
     @event
