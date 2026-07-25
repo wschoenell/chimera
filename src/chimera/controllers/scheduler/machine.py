@@ -220,33 +220,22 @@ class Machine(threading.Thread):
             if program.start_at:
                 wait_time = (program.start_at - now_mjd) * 86.4e3
                 if wait_time > 0.0:
-                    # wait_time is in the site's (possibly fast-forwarded)
-                    # seconds; sleep the equivalent REAL time so a scaled
-                    # clock actually compresses the wait instead of sleeping
-                    # sim-seconds as wall-seconds.  speedup is 1.0 normally.
-                    try:
-                        speedup = float(site.time_speedup())
-                    except Exception:
-                        speedup = 1.0
-                    real_wait = wait_time / speedup if speedup > 0 else wait_time
                     log.debug(
                         "[start] Waiting until MJD %f to start slewing",
                         program.start_at,
                     )
-                    log.debug(
-                        "[start] Will wait %f s (sim) = %f s (real, %gx)",
-                        wait_time,
-                        real_wait,
-                        speedup,
-                    )
-                    if self._cancel_wait.wait(real_wait):
-                        log.debug("[start] wait cancelled; abandoning %s", str(task))
-                        self.controller.program_complete(
-                            program.id,
-                            SchedulerStatus.ABORTED,
-                            "Aborted while waiting for its slew time.",
-                        )
-                        return
+                    log.debug("[start] Will wait %f s (site time)", wait_time)
+                    # Poll the site clock so a fast-forwarded site compresses
+                    # the wait for free (no speedup knowledge here), and block
+                    # on the machine's wake-up Condition -- notified on every
+                    # state change -- so a STOP/SHUTDOWN breaks the wait at once
+                    # instead of after a fixed sleep.
+                    while site.mjd() < program.start_at:
+                        if self.state() in (State.STOP, State.SHUTDOWN):
+                            log.debug("[start] Aborted while waiting for slew start")
+                            return
+                        with self.__wake_up_call:
+                            self.__wake_up_call.wait(1.0)
                 else:
                     if program.valid_for >= 0.0:
                         if -wait_time > program.valid_for:
