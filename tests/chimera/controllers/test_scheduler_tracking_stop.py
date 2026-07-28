@@ -81,6 +81,12 @@ class Controller:
     def get_proxy(self, location):
         return FakeSite() if location == "/Site/0" else self.telescope
 
+    def get_site(self):
+        # the machine asks the manager-injected site for the clock since
+        # #271 (site injection); this double is not managed, so hand it the
+        # same fake get_proxy would have returned
+        return FakeSite()
+
     def program_begin(self, program_id):
         pass
 
